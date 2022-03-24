@@ -107,10 +107,7 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
             self.builder.finish_node();
             return true;
         } else {
-            assert!(
-                task_checkpoint.is_none(),
-                "required a task in this context"
-            )
+            assert!(task_checkpoint.is_none(), "required a task in this context")
         };
 
         // Has to be an assignment
