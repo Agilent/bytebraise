@@ -14,6 +14,8 @@ lazy_static! {
     static ref OVERRIDE_REGEX: Regex = Regex::new(r"[a-z0-9]+").unwrap();
 }
 
+// TODO: handle the new : override syntax  (but try to still support the old syntax?)
+
 /// Maintains back-references to the full conditional forms for each variable.
 #[derive(Clone, Debug)]
 pub struct PerVarOverrideData {
