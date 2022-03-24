@@ -108,7 +108,7 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
             return true;
         } else {
             assert!(
-                !task_checkpoint.is_some(),
+                task_checkpoint.is_none(),
                 "required a task in this context"
             )
         };

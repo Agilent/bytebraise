@@ -58,12 +58,10 @@ impl PerVarOverrideData {
 
     pub fn collect(&self) -> Vec<(String, VarAndOverrideTuple)> {
         self.data
-            .iter()
-            .map(|pair| {
+            .iter().flat_map(|pair| {
                 let var = iter::repeat(pair.0.clone());
                 var.zip(pair.1.iter().cloned()).collect::<Vec<_>>()
             })
-            .flatten()
             .collect::<Vec<_>>()
     }
 }
