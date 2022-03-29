@@ -42,5 +42,5 @@ basic_datasmart_test!(expansion_stuff, d, {
     d.set_var_flag("Q", "wat", "1")?;
 
     let v = d.expand("${EXP}")?.ok_or(DataSmartError::UnwrapNoneError)?;
-    assert_eq!(v, "B");
+    assert_eq!(v, "BQFRIEND");
 });
