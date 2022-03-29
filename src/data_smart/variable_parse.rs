@@ -6,7 +6,6 @@ use {
     crate::data_smart::python_bridge::integration::PyDataSmart,
     crate::utils::contains,
     pyo3::exceptions::PySyntaxError,
-    pyo3::ffi::PyModule_AddFunctions,
     pyo3::once_cell::GILOnceCell,
     pyo3::prelude::*,
     pyo3::types::IntoPyDict,
@@ -63,6 +62,7 @@ fn py_vars_from_file(
     file_name: Option<&str>,
     _d: &PyDataSmart,
 ) -> anyhow::Result<(Option<String>, Option<String>, Option<String>)> {
+    use std::path::PathBuf;
     if let Some(file_name) = file_name.map(|p| PathBuf::from(p)) {
         if matches!(
             file_name.extension().unwrap().to_str(),
@@ -157,6 +157,8 @@ impl VariableParse {
 
     #[cfg(feature = "python")]
     pub fn python_sub(&mut self, caps: &Captures) -> DataSmartResult<String> {
+        use anyhow::Context;
+
         let match_str = caps.get(0).unwrap().as_str();
         let code = &match_str[3..match_str.len() - 1];
 
@@ -228,7 +230,7 @@ impl VariableParse {
             match py.eval(code, Some(globals), locals) {
                 Ok(result) => Ok(result.str().unwrap().to_string()),
                 Err(e) => {
-                    if e.is_instance::<PySyntaxError>(py) {
+                    if e.is_instance_of::<PySyntaxError>(py) {
                         let err_value = e.pvalue(py).str().unwrap();
                         return if err_value
                             .to_str()

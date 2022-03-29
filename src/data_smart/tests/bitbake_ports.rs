@@ -101,7 +101,7 @@ mod data_expansions {
         use pyo3::{PyErr, PyResult, Python};
         let py_result: PyResult<_> = val.map_err(|e| e.downcast::<PyErr>().unwrap());
         Python::with_gil(
-            |py| assert_matches!(py_result, Err(e) if e.is_instance::<PyValueError>(py)),
+            |py| assert_matches!(py_result, Err(e) if e.is_instance_of::<PyValueError>(py)),
         );
     });
 
@@ -114,7 +114,7 @@ mod data_expansions {
         use pyo3::{PyErr, PyResult, Python};
         let py_result: PyResult<_> = val.map_err(|e| e.downcast::<PyErr>().unwrap());
         Python::with_gil(
-            |py| assert_matches!(py_result, Err(e) if e.is_instance::<PyValueError>(py)),
+            |py| assert_matches!(py_result, Err(e) if e.is_instance_of::<PyValueError>(py)),
         );
     });
 
