@@ -203,11 +203,11 @@ impl VariableParse {
 
             let locals = None;
 
-            let oe = PyModule::new(py, "oe")?;
-            let oe_utils = py.import("oe.utils").unwrap();
-            let oe_types = py.import("oe.types").unwrap();
-            oe.setattr("utils", oe_utils)?;
-            oe.setattr("types", oe_types)?;
+            // let oe = PyModule::new(py, "oe")?;
+            // let oe_utils = py.import("oe.utils").unwrap();
+            // let oe_types = py.import("oe.types").unwrap();
+            // oe.setattr("utils", oe_utils)?;
+            // oe.setattr("types", oe_types)?;
 
             let builtins = PyModule::import(py, "builtins")?;
 
@@ -215,7 +215,7 @@ impl VariableParse {
                 ("os", os.to_object(py)),
                 ("bb", bb.to_object(py)),
                 ("time", time.to_object(py)),
-                ("oe", oe.to_object(py)),
+                // ("oe", oe.to_object(py)),
                 ("sys", sys.to_object(py)),
                 ("__builtins__", builtins.to_object(py)),
                 (
