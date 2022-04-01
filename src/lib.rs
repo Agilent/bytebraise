@@ -1,4 +1,3 @@
-#![feature(arc_new_cyclic)]
 #![feature(cell_filter_map)]
 #![feature(box_syntax)]
 #![feature(derive_default_enum)]
