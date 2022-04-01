@@ -35,8 +35,3 @@ python-parser = { version = "0.2.0", optional = true }
 [features]
 default = []
 python = ["python-parser", "pyo3"]
-
-[[bin]]
-name = "bytebraise-layers"
-path = "src/bin/bytebraise_layers.rs"
-
