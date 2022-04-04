@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 use anyhow::Context;
 use im_rc::HashMap;
 use indexmap::set::IndexSet;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 pub use public_interface::DataSmart;
 use regex::{Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
@@ -19,25 +19,23 @@ use crate::data_smart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::overrides::{PerVarOverrideData, VarAndOverrideTuple};
 use crate::data_smart::utils::{split_keep, ReplaceFallible};
 use crate::data_smart::variable_parse::VariableParse;
+use crate::python::handle_python;
 
 pub mod errors;
 pub mod overrides;
 mod public_interface;
-#[cfg(feature = "python")]
-mod python_bridge;
 mod tests;
 pub mod utils;
 pub mod variable_contents;
-mod variable_parse;
+pub mod variable_parse;
 
-lazy_static! {
-    static ref VAR_EXPANSION_REGEX: Regex = Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap();
-    static ref PYTHON_EXPANSION_REGEX: Regex = Regex::new(r"\$\{@.+?}").unwrap();
-    static ref SETVAR_REGEX: Regex =
-        Regex::new(r"^(?P<base>.*?)(?P<keyword>_append|_prepend|_remove)(?:_(?P<add>[^A-Z]*))?$")
-            .unwrap();
-    static ref WHITESPACE_REGEX: Regex = Regex::new(r"\s").unwrap();
-}
+static VAR_EXPANSION_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
+static SETVAR_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?P<base>.*?)(?P<keyword>_append|_prepend|_remove)(?:_(?P<add>[^A-Z]*))?$")
+        .unwrap()
+});
+static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 
 const CONTENT_FLAG: &str = "_content";
 const EXPORT_LIST_ITEM: &str = "__exportlist";
@@ -292,57 +290,33 @@ impl DataSmartInner {
 
         let mut value = str.unwrap().into();
         while value.contains("${") {
-            let q = VAR_EXPANSION_REGEX.replace_fallible(value.as_ref(), |caps: &Captures| {
-                let match_str = caps.get(0).unwrap().as_str();
-                let referenced_var = &match_str[2..match_str.len() - 1];
-                {
-                    let mut s = RefCell::borrow_mut(&self.expand_state);
-                    let set = s.as_mut().unwrap();
-                    if set.visited.contains(referenced_var) {
-                        return Err(DataSmartError::RecursiveReferenceError {
-                            var: referenced_var.to_string(),
+            let new_value =
+                VAR_EXPANSION_REGEX.replace_fallible(value.as_ref(), |caps: &Captures| {
+                    let match_str = caps.get(0).unwrap().as_str();
+                    let referenced_var = &match_str[2..match_str.len() - 1];
+                    {
+                        let mut s = RefCell::borrow_mut(&self.expand_state);
+                        let set = s.as_mut().unwrap();
+                        if set.visited.contains(referenced_var) {
+                            return Err(DataSmartError::RecursiveReferenceError {
+                                var: referenced_var.to_string(),
+                            }
+                            .into());
+                        } else {
+                            set.visited.insert(referenced_var.to_string());
                         }
-                        .into());
-                    } else {
-                        set.visited.insert(referenced_var.to_string());
                     }
-                }
 
-                defer! {
-                    let mut s = RefCell::borrow_mut(&self.expand_state);
-                    let set = s.as_mut().unwrap();
-                    set.visited.remove(referenced_var);
-                }
+                    defer! {
+                        let mut s = RefCell::borrow_mut(&self.expand_state);
+                        let set = s.as_mut().unwrap();
+                        set.visited.remove(referenced_var);
+                    }
 
-                ret.var_sub(caps)
-            })?;
+                    ret.var_sub(caps)
+                })?;
 
-            // TODO: move these functions somewhere else
-            #[cfg(feature = "python")]
-            fn handle_python<'a>(
-                input: &'a Cow<'a, str>,
-                ret: &'a mut VariableParse,
-            ) -> DataSmartResult<Cow<'a, str>> {
-                PYTHON_EXPANSION_REGEX
-                    .replace_fallible(input.as_ref(), |caps: &Captures| ret.python_sub(caps))
-                    .with_context(|| format!("unable to expand {}", input))
-            }
-
-            #[cfg(not(feature = "python"))]
-            fn handle_python<'a>(
-                input: &'a Cow<'a, str>,
-                _: &'a mut VariableParse,
-            ) -> DataSmartResult<Cow<'a, str>> {
-                if PYTHON_EXPANSION_REGEX.find(input.as_ref()).is_some() {
-                    anyhow::bail!(
-                        "built without Python support, but attempted to expand Python expression: {}", input
-                    );
-                }
-                Ok(Cow::Borrowed(input))
-            }
-
-            let q2 = handle_python(&q, &mut ret);
-            let new_value = q2?.to_string();
+            let new_value = handle_python(&new_value, &mut ret)?.to_string();
             if value == new_value {
                 break;
             }

@@ -1,6 +1,6 @@
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
-use crate::data_smart::{DataSmart, DataSmartInner, GetVarOptions};
+use crate::data_smart::{DataSmart, GetVarOptions};
 use crate::parser::parser::parse_bitbake_from_str;
 use crate::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem};
 use crate::syntax::ast::AstToken;

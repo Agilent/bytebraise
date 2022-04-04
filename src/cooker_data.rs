@@ -1,7 +1,7 @@
 use std::env::VarError;
 use std::path::PathBuf;
 
-use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
+use crate::data_smart::variable_contents::VariableContentsAccessors;
 use crate::data_smart::DataSmart;
 use crate::syntax::ast::evaluate::{inherit, parse_config_file};
 use crate::utils::{approved_variables, which};
@@ -145,7 +145,11 @@ impl CookerDataBuilder {
 
         inherit("base.bbclass", &data)?;
 
-        for bbclass in data.get_var("INHERIT")?.as_string_or_empty().split_whitespace() {
+        for bbclass in data
+            .get_var("INHERIT")?
+            .as_string_or_empty()
+            .split_whitespace()
+        {
             inherit(bbclass, &data)?;
         }
 

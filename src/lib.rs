@@ -9,6 +9,7 @@ pub mod data_smart;
 pub mod editor;
 pub mod lexer;
 pub mod parser;
+pub mod python;
 pub mod split_var_value;
 pub mod syntax;
 pub mod utils;

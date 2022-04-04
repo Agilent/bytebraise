@@ -1,7 +1,5 @@
 use std::io;
 
-#[cfg(feature = "python")]
-use pyo3::PyErr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -17,7 +15,7 @@ pub enum DataSmartError {
     #[cfg(feature = "python")]
     PythonError {
         #[from]
-        source: PyErr,
+        source: pyo3::PyErr,
     },
 
     #[error("TODO")]
@@ -28,7 +26,7 @@ pub enum DataSmartError {
 
     #[error("")]
     #[cfg(feature = "python")]
-    PythonSyntaxError { source: PyErr },
+    PythonSyntaxError { source: pyo3::PyErr },
 
     #[error("A variable references itself")]
     RecursiveReferenceError { var: String },
