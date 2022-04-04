@@ -100,7 +100,10 @@ fn evaluate_assignment_expression(
         key: &str,
         flag: Option<&str>,
     ) -> DataSmartResult<Option<VariableContents>> {
-        let get_opts = GetVarOptions::default().no_weak_default(true).parsing(true);
+        let get_opts = GetVarOptions::default()
+            .no_weak_default(true)
+            .parsing(true)
+            .expand(false);
         match flag {
             Some(flag) => data.get_var_flag_contents(key, flag, get_opts),
             None => data.get_var_opt(key, get_opts),
