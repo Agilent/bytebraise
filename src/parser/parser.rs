@@ -71,17 +71,27 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
         self.builder.start_node(SyntaxKind::ExportNode.into());
         self.expect(SyntaxKind::Export);
         self.eat_ws();
-        self.builder.start_node(SyntaxKind::AssignmentNode.into());
+
+        let checkpoint = self.builder.checkpoint();
+
         self.parse_identifier_expression();
         match self.peek() {
-            Some(t) if t.is_assignment_operator() => self.bump(),
+            Some(t) if t.is_assignment_operator() => {
+                self.builder
+                    .start_node_at(checkpoint, SyntaxKind::AssignmentNode.into());
+                self.bump();
+                match self.peek() {
+                    Some(SyntaxKind::DoubleQuotedValue | SyntaxKind::SingleQuotedValue) => {
+                        self.bump()
+                    }
+                    _ => panic!(),
+                }
+                self.builder.finish_node();
+            }
+            Some(SyntaxKind::Newline) | None => {} // fine, this is just an export
             _ => panic!("{:?}", self.peek()),
         }
-        match self.peek() {
-            Some(SyntaxKind::DoubleQuotedValue | SyntaxKind::SingleQuotedValue) => self.bump(),
-            _ => panic!(),
-        }
-        self.builder.finish_node();
+
         self.builder.finish_node();
         true
     }

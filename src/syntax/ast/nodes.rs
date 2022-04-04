@@ -25,8 +25,12 @@ impl Export {
         support::token(&self.syntax).unwrap()
     }
 
-    pub fn assignment(&self) -> Assignment {
+    pub fn var(&self) -> IdentifierExpression {
         support::child(&self.syntax).unwrap()
+    }
+
+    pub fn assignment(&self) -> Option<Assignment> {
+        support::child(&self.syntax)
     }
 }
 

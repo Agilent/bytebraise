@@ -46,7 +46,20 @@ impl Evaluate for RootItem {
 impl Evaluate for Directive {
     fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
         match self {
-            Directive::Export(e) => evaluate_assignment_expression(d, &e.assignment(), true),
+            Directive::Export(e) => {
+                if let Some(assignment) = e.assignment().as_ref() {
+                    evaluate_assignment_expression(d, assignment, true)
+                } else {
+                    let var = e.var();
+                    // TODO: enforce at parse-time so we don't need to do it here
+                    assert!(var.varflag().is_none(), "cannot export varflag");
+
+                    let var = var.identifier();
+                    // TODO: int 1, not string "1"
+                    d.set_var_flag(var.syntax.text().to_string(), "export", "1")?;
+                    Ok(())
+                }
+            }
             Directive::Include(i) => {
                 let what_files = d.expand(i.value().text())?.unwrap_or_default();
                 for file_name in what_files.split_whitespace() {
