@@ -67,7 +67,14 @@ impl CookerDataBuilder {
         }
     }
 
-    pub fn parse_base_configuration(&self) {}
+    pub fn parse_base_configuration(&self) -> ByteBraiseResult<()> {
+        self.parse_configuration_files()?;
+
+        //let valid: VariableContents = self.data.get_var("BB_INVALIDCONF")?.unwrap();
+        //assert!(valid.as_or_default::<bool>());
+
+        Ok(())
+    }
 
     pub fn parse_configuration_files(&self) -> ByteBraiseResult<DataSmart> {
         let data = self.data.create_copy();

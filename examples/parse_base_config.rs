@@ -15,6 +15,7 @@ fn main() {
     std::env::set_current_dir(opts.file).unwrap();
 
     let data_builder = CookerDataBuilder::new();
-    let _d = data_builder.parse_configuration_files().unwrap();
+    data_builder.parse_base_configuration().unwrap();
+
     std::env::set_current_dir(cwd).unwrap();
 }
