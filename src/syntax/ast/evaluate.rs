@@ -1,14 +1,14 @@
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
-use crate::data_smart::{DataSmart, GetVarOptions};
+use crate::data_smart::{DataSmart, DataSmartInner, GetVarOptions};
 use crate::parser::parser::parse_bitbake_from_str;
-use crate::syntax::ast::nodes::{Assignment, Directive, Root, RootItem};
+use crate::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem};
 use crate::syntax::ast::AstToken;
 use crate::syntax::syntax_kind::SyntaxKind;
 use anyhow::Context;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::utils::which;
 
@@ -38,8 +38,21 @@ impl Evaluate for RootItem {
             RootItem::Comment(_c) => Ok(()),
             RootItem::Assignment(e) => e.evaluate(d),
             RootItem::Directive(directive) => directive.evaluate(d),
-            _ => unimplemented!(),
+            RootItem::PythonDef(p) => p.evaluate(d),
+            _ => unimplemented!("{:?}", self),
         }
+    }
+}
+
+impl Evaluate for PythonDef {
+    fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
+        let function = self.function_name().syntax.to_string();
+        // TODO: inject into method pool
+        d.set_var_flag(&function, "func", "1")?;
+        d.set_var_flag(&function, "python", "1")?;
+        d.set_var_opt(&function, self.syntax.to_string(), true)?;
+        // TODO filename, lineno
+        Ok(())
     }
 }
 
@@ -63,11 +76,27 @@ impl Evaluate for Directive {
             Directive::Include(i) => {
                 let what_files = d.expand(i.value().text())?.unwrap_or_default();
                 for file_name in what_files.split_whitespace() {
+                    // TODO: implement require vs include
                     include_single_file(d, file_name)?;
                 }
                 Ok(())
             }
-            _ => unimplemented!(),
+            Directive::Require(r) => {
+                let what_files = d.expand(r.value().text())?.unwrap_or_default();
+                for file_name in what_files.split_whitespace() {
+                    // TODO: implement require vs include
+                    include_single_file(d, file_name)?;
+                }
+                Ok(())
+            }
+            Directive::Inherit(i) => {
+                let what_classes = d.expand(i.value().text())?.unwrap_or_default();
+                for class in what_classes.split_whitespace() {
+                    inherit(class, d)?;
+                }
+                Ok(())
+            }
+            _ => unimplemented!("{:?}", self),
         }
     }
 }
@@ -173,6 +202,7 @@ fn evaluate_assignment_expression(
     Ok(())
 }
 
+// TODO: handle require vs include
 fn include_single_file<F: AsRef<Path>>(data: &DataSmart, file_name: F) -> DataSmartResult<()> {
     // TODO prevent recursion
 
@@ -229,9 +259,22 @@ pub fn parse_config_file<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartRes
     }
 
     println!("file: {:?}", &file);
-    File::open(file)?.read_to_string(&mut source)?;
+    File::open(&file)?.read_to_string(&mut source)?;
     let res = parse_bitbake_from_str(&*source);
     res.evaluate(d)
-        .with_context(|| "failure to evaluate metadata")?;
+        .with_context(|| format!("failure to evaluate metadata for {:?}", &file))?;
     Ok(())
+}
+
+pub fn inherit<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartResult<()> {
+    let mut file = file.as_ref().to_path_buf();
+    if !file.is_absolute() {
+        if file.extension().unwrap_or_default() != ".bbclass" {
+            file.set_extension("bbclass");
+            file = PathBuf::from("classes").join(file);
+        }
+    }
+
+    // TODO: inherit cache
+    parse_config_file(file, d)
 }

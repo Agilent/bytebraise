@@ -21,6 +21,12 @@ ast_token!(DefaultEquals, DefaultEquals);
 ast_token!(WeakEquals, WeakEquals);
 ast_token!(ColonEquals, ColonEquals);
 
+ast_token!(PythonDefKeyword, PythonDefKeyword);
+ast_token!(PythonDefFunctionName, PythonDefFunctionName);
+ast_token!(PythonDefFunctionArgs, PythonDefFunctionArgs);
+ast_token!(Colon, Colon);
+ast_token!(PythonDefFunctionBody, PythonDefFunctionBody);
+
 ast_token!(Varflag, Varflag);
 impl Varflag {
     pub fn value(&self) -> &str {

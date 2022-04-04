@@ -1,7 +1,7 @@
 use crate::ast_node;
 use crate::syntax::ast;
 use crate::syntax::ast::quoted_value::QuotedValue;
-use crate::syntax::ast::tokens::{AssignmentOperator, Identifier, Varflag};
+use crate::syntax::ast::tokens::{AssignmentOperator, Identifier, PythonDefFunctionName, Varflag};
 use crate::syntax::ast::{support, tokens, AstChildren, AstNode, AstToken, SyntaxKind, SyntaxNode};
 
 ast_node!(Assignment, AssignmentNode);
@@ -58,6 +58,12 @@ impl Inherit {
 }
 
 ast_node!(PythonDef, PythonDefNode);
+impl PythonDef {
+    pub fn function_name(&self) -> PythonDefFunctionName {
+        support::token(&self.syntax).unwrap()
+    }
+}
+
 ast_node!(AddTask, AddTaskNode);
 ast_node!(DelTask, DelTaskNode);
 ast_node!(AddHandler, AddHandlerNode);

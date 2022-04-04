@@ -1,9 +1,9 @@
 use std::env::VarError;
 use std::path::PathBuf;
 
-use crate::data_smart::variable_contents::VariableContentsAccessors;
+use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::DataSmart;
-use crate::syntax::ast::evaluate::parse_config_file;
+use crate::syntax::ast::evaluate::{inherit, parse_config_file};
 use crate::utils::{approved_variables, which};
 use crate::ByteBraiseResult;
 
@@ -36,7 +36,10 @@ pub fn find_top_dir() -> ByteBraiseResult<Option<PathBuf>> {
     Ok(None)
 }
 
-pub fn find_config_file(config_file_name: &str, d: &DataSmart) -> ByteBraiseResult<Option<PathBuf>> {
+pub fn find_config_file(
+    config_file_name: &str,
+    d: &DataSmart,
+) -> ByteBraiseResult<Option<PathBuf>> {
     let bbpath = d.get_var("BBPATH")?.as_string_or_empty();
     let bbpath_entries = bbpath.split(':').map(PathBuf::from);
 
@@ -136,9 +139,15 @@ impl CookerDataBuilder {
 
         //panic!("bbpath: {:?}", data.get_var("BBPATH")?);
         //panic!("{:?}", data.get_var("COREBASE")?);
-        parse_config_file(PathBuf::from("conf").join("bitbake.conf"), &data)?;
+        parse_config_file(PathBuf::from("conf").join("bitbake.conf"), &data);
 
-        panic!("{:#?}", data.get_var("MACHINE")?);
+        // TODO: post-files
+
+        inherit("base.bbclass", &data)?;
+
+        for bbclass in data.get_var("INHERIT")?.as_string_or_empty().split_whitespace() {
+            inherit(bbclass, &data)?;
+        }
 
         Ok(data)
     }
