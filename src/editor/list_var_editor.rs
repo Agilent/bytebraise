@@ -3,7 +3,7 @@ use crate::syntax::ast::nodes::Root;
 use crate::syntax::ast::{AstNode, AstToken};
 use crate::syntax::ted::Position;
 use crate::syntax::{make, ted};
-use crate::BitBakeResult;
+use crate::ByteBraiseResult;
 use anyhow::Context;
 use maplit::hashset;
 use std::collections::HashSet;
@@ -31,7 +31,7 @@ pub struct ListVarEditor {
 }
 
 impl ListVarEditor {
-    pub fn from_file<P: AsRef<Path>>(path: P, var: String) -> BitBakeResult<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P, var: String) -> ByteBraiseResult<Self> {
         let path = path.as_ref();
 
         let mut source = String::new();
@@ -68,7 +68,7 @@ impl ListVarEditor {
         })
     }
 
-    pub fn commit(&mut self) -> BitBakeResult<()> {
+    pub fn commit(&mut self) -> ByteBraiseResult<()> {
         let assignments = self
             .root
             .identifier_assignments(&self.var)

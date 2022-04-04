@@ -13,4 +13,4 @@ pub mod split_var_value;
 pub mod syntax;
 pub mod utils;
 
-pub type BitBakeResult<T> = anyhow::Result<T>;
+pub type ByteBraiseResult<T> = anyhow::Result<T>;

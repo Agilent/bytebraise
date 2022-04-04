@@ -5,10 +5,10 @@ use crate::data_smart::variable_contents::VariableContentsAccessors;
 use crate::data_smart::DataSmart;
 use crate::syntax::ast::evaluate::parse_config_file;
 use crate::utils::{approved_variables, which};
-use crate::BitBakeResult;
+use crate::ByteBraiseResult;
 
 // TODO: allow passing in BBPATH from yb env
-pub fn find_top_dir() -> BitBakeResult<Option<PathBuf>> {
+pub fn find_top_dir() -> ByteBraiseResult<Option<PathBuf>> {
     let d = DataSmart::new();
     let bbpath = match std::env::var("BBPATH") {
         Ok(val) => {
@@ -36,7 +36,7 @@ pub fn find_top_dir() -> BitBakeResult<Option<PathBuf>> {
     Ok(None)
 }
 
-pub fn find_config_file(config_file_name: &str, d: &DataSmart) -> BitBakeResult<Option<PathBuf>> {
+pub fn find_config_file(config_file_name: &str, d: &DataSmart) -> ByteBraiseResult<Option<PathBuf>> {
     let bbpath = d.get_var("BBPATH")?.as_string_or_empty();
     let bbpath_entries = bbpath.split(':').map(PathBuf::from);
 
@@ -69,7 +69,7 @@ impl CookerDataBuilder {
 
     pub fn parse_base_configuration(&self) {}
 
-    pub fn parse_configuration_files(&self) -> BitBakeResult<DataSmart> {
+    pub fn parse_configuration_files(&self) -> ByteBraiseResult<DataSmart> {
         let data = self.data.create_copy();
 
         // TODO multiconfig

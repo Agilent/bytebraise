@@ -6,14 +6,14 @@ use std::path::{Path, PathBuf};
 use lazy_static::lazy_static;
 
 use crate::data_smart::DataSmart;
-use crate::BitBakeResult;
+use crate::ByteBraiseResult;
 
 pub fn which<P: AsRef<str>, I: AsRef<Path>>(
     path: P,
     item: I,
     reversed: bool,
     executable: bool,
-) -> BitBakeResult<Option<PathBuf>> {
+) -> ByteBraiseResult<Option<PathBuf>> {
     let paths: Box<dyn Iterator<Item = &str>> = match reversed {
         false => box path.as_ref().split(':'),
         true => box path.as_ref().rsplit(':'),
@@ -45,7 +45,7 @@ pub fn contains<'a, V: AsRef<str>, C: AsRef<str>>(
     true_value: &'a str,
     false_value: &'a str,
     d: &DataSmart,
-) -> BitBakeResult<&'a str> {
+) -> ByteBraiseResult<&'a str> {
     let variable = variable.as_ref();
     let check_values = check_values.as_ref();
 
