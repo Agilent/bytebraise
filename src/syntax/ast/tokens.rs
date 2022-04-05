@@ -5,12 +5,14 @@ use std::fmt::Debug;
 use crate::ast_token;
 
 ast_token!(Identifier, Identifier);
+ast_token!(Task, Task);
 ast_token!(Python, Python);
 ast_token!(Fakeroot, Fakeroot);
 ast_token!(DoubleQuotedValue, DoubleQuotedValue);
 ast_token!(SingleQuotedValue, SingleQuotedValue);
 ast_token!(Export, Export);
 ast_token!(UnquotedValue, UnquotedValue);
+ast_token!(DirectiveArgument, DirectiveArgument);
 
 ast_token!(Equals, Equals);
 ast_token!(EqualsPlus, EqualsPlus);

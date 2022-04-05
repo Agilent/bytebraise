@@ -1,7 +1,9 @@
 use crate::ast_node;
 use crate::syntax::ast;
 use crate::syntax::ast::quoted_value::QuotedValue;
-use crate::syntax::ast::tokens::{AssignmentOperator, Identifier, PythonDefFunctionName, Varflag};
+use crate::syntax::ast::tokens::{
+    AssignmentOperator, DirectiveArgument, Identifier, PythonDefFunctionName, Varflag,
+};
 use crate::syntax::ast::{support, tokens, AstChildren, AstNode, AstToken, SyntaxKind, SyntaxNode};
 
 ast_node!(Assignment, AssignmentNode);
@@ -65,6 +67,52 @@ impl PythonDef {
 }
 
 ast_node!(AddTask, AddTaskNode);
+impl AddTask {
+    pub fn task_name(&self) -> DirectiveArgument {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            // only consider tokens up until we encounter 'after' or 'before'
+            .take_while(|it| !matches!(it.kind(), SyntaxKind::After | SyntaxKind::Before))
+            .find_map(DirectiveArgument::cast)
+            .unwrap()
+    }
+
+    pub fn after(&self) -> Vec<DirectiveArgument> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .skip_while(|it| !matches!(it.kind(), SyntaxKind::After))
+            .take_while(|it| !matches!(it.kind(), SyntaxKind::Before))
+            .filter_map(DirectiveArgument::cast)
+            .collect()
+    }
+
+    pub fn after_names(&self) -> Vec<String> {
+        self.after()
+            .into_iter()
+            .map(|t| t.syntax.text().to_string())
+            .collect()
+    }
+
+    pub fn before(&self) -> Vec<DirectiveArgument> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .skip_while(|it| !matches!(it.kind(), SyntaxKind::Before))
+            .take_while(|it| !matches!(it.kind(), SyntaxKind::After))
+            .filter_map(DirectiveArgument::cast)
+            .collect()
+    }
+
+    pub fn before_names(&self) -> Vec<String> {
+        self.before()
+            .into_iter()
+            .map(|t| t.syntax.text().to_string())
+            .collect()
+    }
+}
+
 ast_node!(DelTask, DelTaskNode);
 ast_node!(AddHandler, AddHandlerNode);
 ast_node!(Comment, Comment);
@@ -242,6 +290,17 @@ impl Task {
         id_node.map(|id| id.identifier())
     }
 
+    pub fn body(&self) -> tokens::Task {
+        support::token(&self.syntax).unwrap()
+    }
+
+    pub fn name_or_anonymous(&self) -> String {
+        self.name()
+            .as_ref()
+            .map(|n| n.text().to_string())
+            .unwrap_or(String::from("__anonymous"))
+    }
+
     pub fn is_python(&self) -> bool {
         self.syntax
             .children_with_tokens()
@@ -259,6 +318,10 @@ impl Task {
     }
 
     pub fn is_anonymous_python(&self) -> bool {
-        self.is_python() && (self.name().as_ref().map(|n| n.text()) == Some("__anonymous"))
+        self.is_python()
+            && matches!(
+                self.name().as_ref().map(|n| n.text()),
+                Some("__anonymous") | None
+            )
     }
 }
