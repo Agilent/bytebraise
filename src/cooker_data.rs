@@ -131,6 +131,8 @@ impl CookerDataBuilder {
 
             data.del_var("LAYERDIR");
             data.del_var("LAYERDIR_RE");
+        } else {
+            panic!();
         }
 
         let _bbfiles_dynamic = data.get_var("BBFILES_DYNAMIC")?.as_string_or_empty();
