@@ -274,16 +274,23 @@ impl DataSmartInner {
             return Ok(ret);
         }
 
+        // |expand_state| is used to track which variables are accessed during an expansion, across
+        // recursive calls to this method. The first (i.e. non-recursive) call to this method is
+        // responsible for setting up and tearing down the state.
+
+        // Create a scope guard that will clear out the expansion state upon scope exit
         let scope = guard((), |()| {
             RefCell::borrow_mut(&self.expand_state).take();
         });
 
+        // Check if we are in the middle of recursion by seeing if the expand state exists yet
         {
             let mut s = RefCell::borrow_mut(&self.expand_state);
             if s.is_none() {
+                // The expansion state doesn't exist yet, so create it
                 *s = Some(ExpansionState::new());
             } else {
-                // The expansion state exists, so defuse scope guard
+                // Expansion state exists; defuse scope guard - we are not responsible for the state
                 ScopeGuard::into_inner(scope);
             }
         }
