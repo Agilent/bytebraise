@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::env::VarError;
 use std::path::PathBuf;
 
@@ -150,7 +151,7 @@ impl CookerDataBuilder {
             .as_string_or_empty()
             .split_whitespace()
         {
-            inherit(bbclass, &data)?;
+            inherit(bbclass, &data).with_context(|| format!("unable to inherit {}", bbclass))?;
         }
 
         Ok(data)
