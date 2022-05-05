@@ -141,6 +141,25 @@ impl DataSmart {
         RefCell::borrow(&self.data).get_var_flag_contents(var, flag, options)
     }
 
+    pub fn get_var_flag(
+        &self,
+        key: &str,
+        flag: &str,
+        options: GetVarOptions,
+        ret_parser: bool,
+    ) -> DataSmartResult<Option<GetVarFlagReturn>> {
+        RefCell::borrow(&self.data).get_var_flag(key, flag, options, ret_parser)
+    }
+
+    pub fn get_var_flags(
+        &self,
+        var: &str,
+        expand: Option<HashSet<String>>,
+        internal_flags: bool,
+    ) -> DataSmartResult<HashMap<String, VariableContents>> {
+        RefCell::borrow(&self.data).get_var_flags(var, expand, internal_flags)
+    }
+
     pub fn del_var_flag<V: AsRef<str>, F: AsRef<str>>(&self, var: V, flag: F) {
         RefCell::borrow(&self.data).del_var_flag(var, flag)
     }
