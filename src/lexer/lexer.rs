@@ -140,7 +140,7 @@ fn scan_task(start: usize, m: &mut Muncher) -> Token {
                     len: m.position() - start,
                 };
                 assert!(
-                    matches!(m.peek(), None | Some(&'\n')),
+                    matches!(m.peek(), None | Some(&' ') | Some(&'\n')),
                     "{}",
                     "'}' should be on a line by itself"
                 );
