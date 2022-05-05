@@ -301,6 +301,7 @@ impl DataSmartInner {
                 VAR_EXPANSION_REGEX.replace_fallible(value.as_ref(), |caps: &Captures| {
                     let match_str = caps.get(0).unwrap().as_str();
                     let referenced_var = &match_str[2..match_str.len() - 1];
+
                     {
                         let mut s = RefCell::borrow_mut(&self.expand_state);
                         let set = s.as_mut().unwrap();
@@ -350,7 +351,7 @@ impl DataSmartInner {
         options: GetVarOptions,
     ) -> DataSmartResult<Option<VariableContents>> {
         self.get_var_flag_contents(var, CONTENT_FLAG, options)
-            .with_context(|| format!("get_var_opt {}", var))
+            .with_context(|| format!("get_var_opt {}, {:?}", var, options))
     }
 
     pub fn get_var(&self, var: &str) -> DataSmartResult<Option<VariableContents>> {
