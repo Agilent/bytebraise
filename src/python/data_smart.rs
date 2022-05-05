@@ -2,10 +2,11 @@ use anyhow::Context;
 use pyo3::exceptions::{PyException, PyRuntimeError};
 use pyo3::prelude::*;
 use pyo3::{create_exception, PyObject, PyRefMut};
+use std::collections::HashSet;
 
 use crate::data_smart::errors::DataSmartError;
 use crate::data_smart::variable_contents::VariableContents;
-use crate::data_smart::{DataSmart, GetVarOptions};
+use crate::data_smart::{DataSmart, GetVarFlagReturn, GetVarOptions};
 
 #[pyclass(unsendable)]
 pub struct PyDataSmart {

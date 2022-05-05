@@ -61,6 +61,7 @@ impl Inherit {
 
 ast_node!(PythonDef, PythonDefNode);
 impl PythonDef {
+    /// Warning: may contain trailing spaces!
     pub fn function_name(&self) -> PythonDefFunctionName {
         support::token(&self.syntax).unwrap()
     }

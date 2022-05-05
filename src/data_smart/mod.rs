@@ -311,7 +311,10 @@ impl DataSmartInner {
                             }
                             .into());
                         } else {
-                            set.visited.insert(referenced_var.to_string());
+                            // TODO: remove hack - when accessing contents of 'OVERRIDES' variable,
+                            if referenced_var != "TOOLCHAIN" && referenced_var != "RUNTIME" {
+                                set.visited.insert(referenced_var.to_string());
+                            }
                         }
                     }
 

@@ -12,6 +12,10 @@ static PYTHON_EXPANSION_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{@.+?}
 #[cfg(not(feature = "python"))]
 mod no_python;
 
+mod fixups;
+#[cfg(feature = "python")]
+pub mod method_pool;
+
 #[cfg(not(feature = "python"))]
 pub use no_python::handle_python;
 

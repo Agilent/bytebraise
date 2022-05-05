@@ -2,11 +2,14 @@ use crate::data_smart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::utils::ReplaceFallible;
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::data_smart::PyDataSmart;
+use crate::python::method_pool::method_pool;
 use crate::python::PYTHON_EXPANSION_REGEX;
 use anyhow::Context;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use std::borrow::Cow;
+use std::env;
+use std::error::Error;
 use {
     crate::utils::contains,
     pyo3::exceptions::PySyntaxError,
@@ -128,43 +131,9 @@ impl VariableParse {
             let os = PyModule::import(py, "os")?;
             let time = PyModule::import(py, "time")?;
 
-            //             use pyo3::py_run;
-            //
-            //             let locals = [("module_name", "oe.types"), ("file_path", "/home/laplante/yocto/sources/poky/meta/lib/oe/types.py")].into_py_dict(py);
-            //             py_run!(py, *locals, r##"
-            // import importlib.util
-            // import sys
-            // spec = importlib.util.spec_from_file_location(module_name, file_path)
-            // module = importlib.util.module_from_spec(spec)
-            // sys.modules[module_name] = module
-            // spec.loader.exec_module(module)
-            //     "##);
-            //
-            //             let locals = [("module_name", "oe.utils"), ("file_path", "/home/laplante/yocto/sources/poky/meta/lib/oe/utils.py")].into_py_dict(py);
-            //             py_run!(py, *locals, r##"
-            // import importlib.util
-            // import sys
-            // spec = importlib.util.spec_from_file_location(module_name, file_path)
-            // module = importlib.util.module_from_spec(spec)
-            // sys.modules[module_name] = module
-            // spec.loader.exec_module(module)
-            //     "##);
             let sys: &PyModule = py.import("sys").unwrap();
-            let syspath: &PyList = sys.getattr("path").unwrap().try_into().unwrap();
-
-            // syspath
-            //     .insert(0, "/home/laplante/yocto/sources/poky/meta/lib/")
-            //     .unwrap();
 
             let bb = get_shared_list(py);
-
-            let locals = None;
-
-            // let oe = PyModule::new(py, "oe")?;
-            // let oe_utils = py.import("oe.utils").unwrap();
-            // let oe_types = py.import("oe.types").unwrap();
-            // oe.setattr("utils", oe_utils)?;
-            // oe.setattr("types", oe_types)?;
 
             let builtins = PyModule::import(py, "builtins")?;
 
@@ -172,23 +141,40 @@ impl VariableParse {
                 ("os", os.to_object(py)),
                 ("bb", bb.to_object(py)),
                 ("time", time.to_object(py)),
-                // ("oe", oe.to_object(py)),
                 ("sys", sys.to_object(py)),
                 ("__builtins__", builtins.to_object(py)),
-                (
-                    "d",
-                    PyCell::new(py, PyDataSmart::new(self.d.clone()))
-                        .unwrap()
-                        .to_object(py),
-                ),
             ]
             .into_py_dict(py);
 
-            match py.eval(code, Some(globals), locals) {
-                Ok(result) => Ok(result.str().unwrap().to_string()),
+            for item in method_pool(py) {
+                globals.set_item(item.0, item.1).unwrap();
+            }
+
+            let mut code_builder = String::with_capacity(code.len());
+
+            code_builder.push_str("import sys\n");
+            code_builder.push_str(&format!(
+                "sys.argv = ['{}']\n",
+                env::current_exe().unwrap().to_str().unwrap()
+            ));
+            code_builder.push_str(&format!("ret = {}", code));
+
+            let locals = [(
+                "d",
+                PyCell::new(py, PyDataSmart::new(self.d.clone()))
+                    .unwrap()
+                    .to_object(py),
+            )]
+            .into_py_dict(py);
+
+            match py.run(&code_builder, Some(globals), Some(locals)) {
+                Ok(()) => {
+                    let ret = locals.get_item("ret").unwrap().to_string();
+                    Ok(ret)
+                }
                 Err(e) => {
                     if e.is_instance_of::<PySyntaxError>(py) {
-                        let err_value = e.pvalue(py).str().unwrap();
+                        let err_value = e.value(py).str().unwrap();
                         return if err_value
                             .to_str()
                             .unwrap()
@@ -202,9 +188,10 @@ impl VariableParse {
                         };
                     }
 
+                    let traceback = e.traceback(py).unwrap().format().unwrap();
                     let ret: anyhow::Error = e.into();
 
-                    Err(ret).context(format!("couldn't expand expression: {}", &code))
+                    Err(ret).context(traceback)
                 }
             }
         })

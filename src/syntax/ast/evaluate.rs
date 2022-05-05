@@ -1,8 +1,11 @@
+use crate::build;
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::{DataSmart, GetVarOptions};
 use crate::parser::parser::parse_bitbake_from_str;
-use crate::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem};
+#[cfg(feature = "python")]
+use crate::python::method_pool::compile_function;
+use crate::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem, Task};
 use crate::syntax::ast::AstToken;
 use crate::syntax::syntax_kind::SyntaxKind;
 use anyhow::Context;
@@ -39,18 +42,50 @@ impl Evaluate for RootItem {
             RootItem::Assignment(e) => e.evaluate(d),
             RootItem::Directive(directive) => directive.evaluate(d),
             RootItem::PythonDef(p) => p.evaluate(d),
+            RootItem::Task(t) => t.evaluate(d),
             _ => unimplemented!("{:?}", self),
         }
+    }
+}
+
+impl Evaluate for Task {
+    fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
+        if self.is_anonymous_python() {
+            // TODO
+        }
+
+        let funcname = self.name_or_anonymous();
+
+        if self.is_python() {
+            d.set_var_flag(&funcname, "python", "1")?;
+        } else {
+            d.del_var_flag(&funcname, "python");
+        }
+
+        if self.is_fakeroot() {
+            d.set_var_flag(&funcname, "fakeroot", "1")?;
+        } else {
+            d.del_var_flag(&funcname, "fakeroot");
+        }
+
+        d.set_var_flag(&funcname, "func", "1")?;
+        let body = self.body().syntax.text().to_string();
+        d.set_var_opt(&funcname, body, true)?;
+        Ok(())
     }
 }
 
 impl Evaluate for PythonDef {
     fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
         let function = self.function_name().syntax.to_string();
-        // TODO: inject into method pool
+        let body = self.syntax.text().to_string();
+
+        #[cfg(feature = "python")]
+        compile_function(&function, &body)?;
+
         d.set_var_flag(&function, "func", "1")?;
         d.set_var_flag(&function, "python", "1")?;
-        d.set_var_opt(&function, self.syntax.to_string(), true)?;
+        d.set_var_opt(&function, body, true)?;
         // TODO filename, lineno
         Ok(())
     }
@@ -96,6 +131,17 @@ impl Evaluate for Directive {
                 }
                 Ok(())
             }
+            Directive::AddTask(a) => {
+                build::add_task(
+                    a.task_name().syntax.text(),
+                    a.before_names(),
+                    a.after_names(),
+                    d,
+                )?;
+                Ok(())
+            }
+            Directive::ExportFunctions(e) => Ok(()),
+            Directive::AddHandler(a) => Ok(()),
             _ => unimplemented!("{:?}", self),
         }
     }
@@ -276,5 +322,6 @@ pub fn inherit<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartResult<()> {
     }
 
     // TODO: inherit cache
+    eprintln!("{:?}", file);
     parse_config_file(file, d)
 }

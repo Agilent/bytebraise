@@ -1,14 +1,16 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use anyhow::Context;
-#[cfg(feature = "python")]
-use pyo3::prelude::*;
 
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::variable_parse::VariableParse;
-use crate::data_smart::{expand_keys, DataSmartInner, GetVarOptions};
+use crate::data_smart::{expand_keys, DataSmartInner, GetVarFlagReturn, GetVarOptions};
+
+#[cfg(feature = "python")]
+use pyo3::pyclass;
 
 #[cfg_attr(feature = "python", pyclass(unsendable))]
 #[derive(Clone, Debug)]
