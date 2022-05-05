@@ -387,6 +387,46 @@ impl DataSmartInner {
         })
     }
 
+    pub fn get_var_flags(
+        &self,
+        var: &str,
+        expand: Option<HashSet<String>>,
+        internal_flags: bool,
+    ) -> DataSmartResult<std::collections::HashMap<String, VariableContents>> {
+        let var_flags = self.find_var(var);
+        if var_flags.is_none() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // TODO: simpler way?
+        let var_flags: Box<dyn Iterator<Item = (String, VariableContents)>> = match internal_flags {
+            true => box var_flags.unwrap().clone().into_iter(),
+            false => box var_flags
+                .unwrap()
+                .clone()
+                .into_iter()
+                .filter(|(flag, data)| !flag.starts_with('_')),
+        };
+
+        let ret = var_flags
+            .into_iter()
+            .map(|(flag, data)| {
+                if expand.as_ref().map_or(false, |set| set.contains(&flag)) {
+                    // TODO: don't unwrap
+                    let expanded = self
+                        .expand(&flag, Some(format!("[{}]", flag)))
+                        .unwrap()
+                        .unwrap();
+                    (flag, expanded.into())
+                } else {
+                    (flag, data)
+                }
+            })
+            .collect();
+
+        Ok(ret)
+    }
+
     pub fn get_var_flag(
         &self,
         key: &str,
