@@ -123,7 +123,7 @@ pub struct DataSmartInner {
     expand_state: RefCell<Option<ExpansionState>>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct GetVarOptions {
     expand: bool,
     no_weak_default: bool,
