@@ -6,6 +6,7 @@ use crate::python::method_pool::method_pool;
 use crate::python::PYTHON_EXPANSION_REGEX;
 use anyhow::Context;
 use once_cell::sync::Lazy;
+use pyo3::py_run;
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::env;
@@ -115,6 +116,22 @@ fn py_contains<'a>(
     contains(variable, checkvalues, truevalue, falsevalue, &d.data).unwrap()
 }
 
+static ENVIRONMENT_SETUP: GILOnceCell<()> = GILOnceCell::new();
+
+pub fn setup_environment(py: Python) {
+    ENVIRONMENT_SETUP.get_or_init(py, || {
+        let sys = py.eval("__import__('sys')", None, None).unwrap();
+        py_run!(
+            py,
+            sys,
+            &format!(
+                "sys.argv = ['{}']",
+                env::current_exe().unwrap().to_str().unwrap()
+            )
+        );
+    });
+}
+
 impl VariableParse {
     pub fn python_sub(&mut self, caps: &Captures) -> DataSmartResult<String> {
         use anyhow::Context;
@@ -150,15 +167,6 @@ impl VariableParse {
                 globals.set_item(item.0, item.1).unwrap();
             }
 
-            let mut code_builder = String::with_capacity(code.len());
-
-            code_builder.push_str("import sys\n");
-            code_builder.push_str(&format!(
-                "sys.argv = ['{}']\n",
-                env::current_exe().unwrap().to_str().unwrap()
-            ));
-            code_builder.push_str(&format!("ret = {}", code));
-
             let locals = [(
                 "d",
                 PyCell::new(py, PyDataSmart::new(self.d.clone()))
@@ -167,11 +175,11 @@ impl VariableParse {
             )]
             .into_py_dict(py);
 
-            match py.run(&code_builder, Some(globals), Some(locals)) {
-                Ok(()) => {
-                    let ret = locals.get_item("ret").unwrap().to_string();
-                    Ok(ret)
-                }
+            // TODO: move some of the stuff from above into one-time env setup?
+            setup_environment(py);
+
+            match py.eval(&code, Some(globals), Some(locals)) {
+                Ok(result) => Ok(result.str().unwrap().to_string()),
                 Err(e) => {
                     if e.is_instance_of::<PySyntaxError>(py) {
                         let err_value = e.value(py).str().unwrap();
