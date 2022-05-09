@@ -71,8 +71,12 @@ impl CookerDataBuilder {
         }
     }
 
-    pub fn parse_base_configuration(&self) -> ByteBraiseResult<()> {
-        self.parse_configuration_files()?;
+    pub fn data(&self) -> DataSmart {
+        self.data.create_copy()
+    }
+
+    pub fn parse_base_configuration(&mut self) -> ByteBraiseResult<()> {
+        self.data = self.parse_configuration_files()?;
 
         //let valid: VariableContents = self.data.get_var("BB_INVALIDCONF")?.unwrap();
         //assert!(valid.as_or_default::<bool>());
@@ -158,4 +162,8 @@ impl CookerDataBuilder {
 
         Ok(data)
     }
+}
+
+pub struct LayerPriorities {
+
 }

@@ -1,6 +1,5 @@
 #![feature(cell_filter_map)]
 #![feature(box_syntax)]
-#![feature(derive_default_enum)]
 #![feature(min_specialization)]
 #![feature(assert_matches)]
 
