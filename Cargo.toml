@@ -1,5 +1,7 @@
 [package]
 name = "bytebraise"
+description = "Proof-of-concept experiment to see how much of BitBake can be implemented in Rust"
+homepage = "https://github.com/Agilent/bytebraise"
 version = "0.1.1"
 authors = ["Chris Laplante <chris.laplante@agilent.com>"]
 license = "MIT"
