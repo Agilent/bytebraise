@@ -15,8 +15,8 @@ pub fn which<P: AsRef<str>, I: AsRef<Path>>(
     executable: bool,
 ) -> ByteBraiseResult<Option<PathBuf>> {
     let paths: Box<dyn Iterator<Item = &str>> = match reversed {
-        false => box path.as_ref().split(':'),
-        true => box path.as_ref().rsplit(':'),
+        false => Box::new(path.as_ref().split(':')),
+        true => Box::new(path.as_ref().rsplit(':')),
     };
 
     let ret = paths

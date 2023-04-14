@@ -403,12 +403,12 @@ impl DataSmartInner {
 
         // TODO: simpler way?
         let var_flags: Box<dyn Iterator<Item = (String, VariableContents)>> = match internal_flags {
-            true => box var_flags.unwrap().clone().into_iter(),
-            false => box var_flags
+            true => Box::new(var_flags.unwrap().clone().into_iter()),
+            false => Box::new(var_flags
                 .unwrap()
                 .clone()
                 .into_iter()
-                .filter(|(flag, data)| !flag.starts_with('_')),
+                .filter(|(flag, data)| !flag.starts_with('_'))),
         };
 
         let ret = var_flags
@@ -877,7 +877,7 @@ impl DataSmartInner {
             let b = (
                 Box::new(value.clone()),
                 Box::new(VariableContents::from(
-                    overridestr.map(|v| box VariableContents::from(v)),
+                    overridestr.map(|v| Box::new(VariableContents::from(v))),
                 )),
             );
             ret.push(b.into());
