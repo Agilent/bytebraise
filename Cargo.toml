@@ -8,7 +8,7 @@ authors = ["Chris Laplante <chris.laplante@agilent.com>"]
 license = "MIT"
 edition = "2018"
 
-exclude = [ "/.gitignore" ]
+exclude = [ "/.idea" ]
 
 [dependencies]
 anyhow = "1"
