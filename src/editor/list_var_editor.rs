@@ -35,11 +35,11 @@ impl ListVarEditor {
         let path = path.as_ref();
 
         let mut source = String::new();
-        File::open(&path)
+        File::open(path)
             .with_context(|| format!("failed to read {:?}", &path))?
             .read_to_string(&mut source)?;
 
-        let root = parse_bitbake_from_str(&*source).clone_for_update();
+        let root = parse_bitbake_from_str(&source).clone_for_update();
         let assignments = root.identifier_assignments(&var).collect::<Vec<_>>();
         assert!(
             assignments.len() < 2,

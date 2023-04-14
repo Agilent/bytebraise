@@ -79,7 +79,6 @@ impl QuotedValue {
     pub fn sorted_lines(&self) -> Self {
         let vals = self
             .lines()
-            .into_iter()
             .filter_map(|v| match v.trim() {
                 v if v.is_empty() => None,
                 v => Some(v.to_owned()),

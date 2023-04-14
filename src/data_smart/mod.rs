@@ -250,12 +250,12 @@ impl DataSmartInner {
 
         for key in self._klist() {
             if let Some(referrervalue) = self
-                .get_var_opt(&*key, GetVarOptions::default().expand(false))
+                .get_var_opt(&key, GetVarOptions::default().expand(false))
                 .with_context(|| format!("expand_varref: {}", variable))?
             {
                 let referrervalue = referrervalue.as_string();
                 if referrervalue.contains(&needle) {
-                    let referrervalue = referrervalue.replace(&needle, &*value);
+                    let referrervalue = referrervalue.replace(&needle, &value);
                     self.set_var(key, referrervalue, false)?;
                 }
             }
@@ -404,11 +404,13 @@ impl DataSmartInner {
         // TODO: simpler way?
         let var_flags: Box<dyn Iterator<Item = (String, VariableContents)>> = match internal_flags {
             true => Box::new(var_flags.unwrap().clone().into_iter()),
-            false => Box::new(var_flags
-                .unwrap()
-                .clone()
-                .into_iter()
-                .filter(|(flag, data)| !flag.starts_with('_'))),
+            false => Box::new(
+                var_flags
+                    .unwrap()
+                    .clone()
+                    .into_iter()
+                    .filter(|(flag, _data)| !flag.starts_with('_')),
+            ),
         };
 
         let ret = var_flags
@@ -490,7 +492,7 @@ impl DataSmartInner {
                                     // Note this is only removing the override once at the end, as
                                     // opposed to BitBake which just uses |replace|.
                                     active_override_to_full_var_map
-                                        .insert((&a[..a.len() - suffix.len()]).to_string(), t);
+                                        .insert(a[..a.len() - suffix.len()].to_string(), t);
 
                                     map_was_modified = true;
                                 } else if a == o {

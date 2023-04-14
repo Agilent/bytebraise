@@ -1,15 +1,12 @@
-use crate::data_smart::variable_contents::VariableContents;
-use crate::data_smart::{DataSmart, GetVarOptions};
+use crate::data_smart::DataSmart;
 use crate::ByteBraiseResult;
-use std::collections::BTreeSet;
-use std::convert::TryInto;
 
-const BBTASKS: &'static str = "__BBTASKS";
+const BBTASKS: &str = "__BBTASKS";
 
 pub fn add_task<T>(
     task: T,
-    before: Vec<String>,
-    after: Vec<String>,
+    _before: Vec<String>,
+    _after: Vec<String>,
     d: &DataSmart,
 ) -> ByteBraiseResult<()>
 where

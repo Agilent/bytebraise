@@ -140,8 +140,8 @@ impl Evaluate for Directive {
                 )?;
                 Ok(())
             }
-            Directive::ExportFunctions(e) => Ok(()),
-            Directive::AddHandler(a) => Ok(()),
+            Directive::ExportFunctions(_e) => Ok(()),
+            Directive::AddHandler(_a) => Ok(()),
             _ => unimplemented!("{:?}", self),
         }
     }
@@ -306,7 +306,7 @@ pub fn parse_config_file<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartRes
 
     println!("file: {:?}", &file);
     File::open(&file)?.read_to_string(&mut source)?;
-    let res = parse_bitbake_from_str(&*source);
+    let res = parse_bitbake_from_str(&source);
     res.evaluate(d)
         .with_context(|| format!("failure to evaluate metadata for {:?}", &file))?;
     Ok(())
@@ -314,11 +314,9 @@ pub fn parse_config_file<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartRes
 
 pub fn inherit<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartResult<()> {
     let mut file = file.as_ref().to_path_buf();
-    if !file.is_absolute() {
-        if file.extension().unwrap_or_default() != ".bbclass" {
-            file.set_extension("bbclass");
-            file = PathBuf::from("classes").join(file);
-        }
+    if !file.is_absolute() && file.extension().unwrap_or_default() != ".bbclass" {
+        file.set_extension("bbclass");
+        file = PathBuf::from("classes").join(file);
     }
 
     // TODO: inherit cache

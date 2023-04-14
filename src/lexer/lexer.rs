@@ -59,7 +59,7 @@ fn scan_keyword(first_char: char, m: &mut Muncher) -> Option<Token> {
         if first_char == keyword.0.chars().next().unwrap() {
             let f = m.fork();
 
-            for c in (&keyword.0[1..]).chars() {
+            for c in keyword.0[1..].chars() {
                 if Some(&c) != f.peek() {
                     continue 'outer;
                 }

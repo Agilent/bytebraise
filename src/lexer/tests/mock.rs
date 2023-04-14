@@ -73,13 +73,13 @@ macro_rules! assert_tokenizes_as {
         ($input:expr, $($tokens:expr),+) => {
             // TODO: also inject some newlines and retest
             let mut expected_tokens = vec![];
-            for token in vec![$(crate::lexer::tests::TokenMock::from($tokens)),+] {
+            for token in vec![$($crate::lexer::tests::TokenMock::from($tokens)),+] {
                 expected_tokens.push(token);
             }
 
             let mut start = 0;
             let mut lexed_tokens = vec![];
-            for token in crate::lexer::tokenize($input) {
+            for token in $crate::lexer::tokenize($input) {
                 lexed_tokens.push(crate::lexer::tests::TokenMock {
                     kind: token.kind,
                     len: token.len,

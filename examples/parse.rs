@@ -18,7 +18,7 @@ fn main() {
 
     File::open(opts.file).unwrap().read_to_string(&mut data);
 
-    let parsed = parse_bitbake_from_str(&*data);
+    let parsed = parse_bitbake_from_str(&data);
 
     println!("{:#?}", &parsed);
 

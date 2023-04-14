@@ -66,7 +66,7 @@ macro_rules! ast_node {
         pub struct $ast {
             pub(crate) syntax: SyntaxNode,
         }
-        impl crate::syntax::ast::AstNode for $ast {
+        impl $crate::syntax::ast::AstNode for $ast {
             #[allow(unused)]
             fn cast(node: SyntaxNode) -> Option<Self> {
                 if node.kind() == SyntaxKind::$kind {
@@ -97,7 +97,7 @@ macro_rules! ast_token {
         pub struct $ast {
             pub(crate) syntax: SyntaxToken,
         }
-        impl crate::syntax::ast::AstToken for $ast {
+        impl $crate::syntax::ast::AstToken for $ast {
             #[allow(unused)]
             fn cast(token: SyntaxToken) -> Option<Self> {
                 if token.kind() == SyntaxKind::$kind {
