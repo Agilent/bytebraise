@@ -81,7 +81,7 @@ pub struct VarAndOverrideTuple {
 /// [("VAR_foo_bar", ("VAR_foo_bar_baz", "baz")),
 ///  ("VAR_foo", ("VAR_foo_bar_baz", "bar_baz")),
 ///  ("VAR", ("VAR_foo_bar_baz", "foo_bar_baz"))]
-fn decompose_variable(var: &str) -> Vec<(String, VarAndOverrideTuple)> {
+pub fn decompose_variable(var: &str) -> Vec<(String, VarAndOverrideTuple)> {
     let mut ret = vec![];
 
     for (shortvar, override_var) in var.rsplit_all('_') {
