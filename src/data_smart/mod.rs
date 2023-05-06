@@ -794,6 +794,7 @@ impl DataSmartInner {
 
         while !new_refs.is_subset(&RefCell::borrow(&self.override_state).vars) {
             let mut nextnew = HashSet::new();
+            RefCell::borrow_mut(&self.override_state).vars.extend(nextnew.iter().cloned());
             for i in &new_refs {
                 if let Some(v) = self.get_var_opt(i.as_str(), GetVarOptions::default())? {
                     let str: String = v.as_string();
