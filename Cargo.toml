@@ -6,7 +6,7 @@ repository = "https://github.com/Agilent/bytebraise"
 version = "0.1.3"
 authors = ["Chris Laplante <chris.laplante@agilent.com>"]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 
 exclude = [ "/.idea" ]
 
