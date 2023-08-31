@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use petgraph::Graph;
 use petgraph::stable_graph::{DefaultIx, NodeIndex};
 use regex::Regex;
+use bytebraise::data_smart::overrides::decompose_variable;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -105,7 +106,13 @@ impl DataSmart {
         let var_name = var_name.into();
         let value = value.into();
 
+        // Check for append/prepend/remove operation
         if let Some(regex_match) = SETVAR_REGEX.captures(&var_name) {
+            // Base variable name, possibly with its own overrides. For example:
+            // P_class-target_append_arm yields:
+            //      base: P_class-target
+            //      keyword: _append
+            //      overrides: arm
             let base = regex_match.name("base").unwrap().as_str();
             let keyword = regex_match.name("keyword").unwrap().as_str();
             let overridestr = regex_match.name("add").map(|o| o.as_str().to_string());
@@ -128,12 +135,41 @@ impl DataSmart {
                 }
                 _ => unreachable!()
             }
-
         } else {
-            let node = self.ds.add_node(GraphItem::Variable(Variable::new(value.clone())));
-            self.vars.insert(var_name.into(), node);
-            self.add_variable_edges(node, value);
+            let index = self._create_variable_hierarchy(&*var_name);
+            let Some(GraphItem::Variable(var_node)) = self.ds.node_weight_mut(index) else { panic!() };
+            var_node.value = value.clone();
+
+            //let node = self.ds.add_node(GraphItem::Variable(Variable::new(value.clone())));
+            //self.vars.insert(var_name.into(), node);
+            //self.add_variable_edges(node, value);
         }
+    }
+
+    fn _create_variable_hierarchy(&mut self, var: &str) -> Index {
+        if let Some(ret) = self.vars.get(var) {
+            return *ret;
+        }
+
+        // Create most specific variable
+        let ret = self.ds.add_node(GraphItem::Variable(Variable::new("")));
+        let mut last_created = ret;
+        self.vars.insert(var.to_string(), last_created);
+
+        for i in decompose_variable(var) {
+            if let Some(index) = self.vars.get(&*i.0) {
+                return ret;
+            }
+
+            eprintln!("create node: {}", i.0);
+            let index = self.ds.add_node(GraphItem::Variable(Variable::new("")));
+            self.vars.insert(i.0, index);
+            self.ds.add_edge(last_created, index, 0);
+
+            last_created = index;
+        }
+
+        ret
     }
 
     fn set_var_flag(&mut self, var_name: impl Into<String> + Clone, flag: impl Into<String>, value: impl Into<String>) {
@@ -164,8 +200,8 @@ impl DataSmart {
 
 fn main() {
     let mut ds = DataSmart::new();
-    ds.set_var("B", "C");
-    ds.set_var("B_append", "OK");
+    ds.set_var("P_wat_test", "C");
+    ds.set_var("P_wat", "OK");
 
     dbg!(ds);
 }
