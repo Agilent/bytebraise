@@ -1,6 +1,5 @@
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
-use petgraph::Graph;
 use petgraph::stable_graph::{DefaultIx, NodeIndex};
 use regex::Regex;
 use bytebraise::data_smart::overrides::decompose_variable;
@@ -202,6 +201,8 @@ fn main() {
     let mut ds = DataSmart::new();
     ds.set_var("P_wat_test", "C");
     ds.set_var("P_wat", "OK");
+    ds.set_var("A_b_c", "2");
+    ds.set_var("FILES_${PN}", "100");
 
     dbg!(ds);
 }
