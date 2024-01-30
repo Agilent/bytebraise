@@ -39,6 +39,8 @@ unicode-segmentation = "1"
 pyo3 = { version = "0.18.3", features = ["auto-initialize", "anyhow"], optional = true }
 python-parser = { version = "0.2.0", optional = true }
 
+v8 = "0.83.1"
+
 
 [features]
 default = []
