@@ -3,12 +3,24 @@ use fxhash::FxHashMap;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::DefaultIx;
 use std::collections::BinaryHeap;
+use once_cell::sync::Lazy;
+use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
+use regex::Regex;
+
+static VAR_EXPANSION_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
+static SETVAR_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)(?::(?P<add>[^A-Z]*))?$")
+        .unwrap()
+});
+static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
+
 
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {
     seq: usize,
-    heap: BinaryHeap<(T,usize)>
+    heap: BinaryHeap<(T, usize)>,
 }
 
 // TODO: varflags as separate variables?
@@ -26,7 +38,6 @@ enum VariableOperationType {
     Prepend,
     Remove,
 }
-
 
 impl Ord for VariableOperationType {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -72,22 +83,22 @@ impl PartialOrd for VariableOperation {
     }
 }
 
-impl<T:Ord> FifoHeap<T> {
-    pub fn new()->Self {
+impl<T: Ord> FifoHeap<T> {
+    pub fn new() -> Self {
         FifoHeap {
             seq: usize::MAX,
-            heap: BinaryHeap::new()
+            heap: BinaryHeap::new(),
         }
     }
 
-    pub fn push(&mut self, val:T) {
+    pub fn push(&mut self, val: T) {
         let seq = self.seq.checked_sub(1).unwrap();
         self.seq = seq;
         self.heap.push((val, seq));
     }
 
-    pub fn pop(&mut self)->Option<T> {
-        let (val,_) = self.heap.pop()?;
+    pub fn pop(&mut self) -> Option<T> {
+        let (val, _) = self.heap.pop()?;
         Some(val)
     }
 }
@@ -105,16 +116,54 @@ impl DataSmart {
             vars: FxHashMap::default(),
         }
     }
+
+    pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        let var = var.into();
+        let value = value.into();
+
+        // Check for append/prepend/remove operation
+        if let Some(regex_match) = SETVAR_REGEX.captures(&var) {
+            // Base variable name, possibly with its own overrides. For example:
+            // P:class-target:append:arm yields:
+            //      base: P:class-target
+            //      keyword: :append
+            //      overrides: arm
+            let base = regex_match.name("base").unwrap().as_str();
+            let keyword = regex_match.name("keyword").unwrap().as_str();
+            let overridestr = regex_match.name("add").map(|o| o.as_str().to_string());
+
+            let base_variable_index = self._get_or_create_var(var_name.clone());
+            let override_ = overridestr.map(|s| self._intern_expression(s));
+            let value = self._intern_expression(value.clone());
+            let base_variable_data = self.ds.node_weight_mut(base_variable_index).unwrap();
+
+            let GraphItem::Variable(var) = base_variable_data else { panic!(); };
+            match keyword {
+                "_append" => {
+                    var.appends.push(Apr { override_, value });
+                }
+                "_prepend" => {
+                    var.prepends.push(Apr { override_, value });
+                }
+                "_remove" => {
+                    var.removes.push(Apr { override_, value });
+                }
+                _ => unreachable!()
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
 struct Variable {
     name: String,
-    operations: FifoHeap<VariableOperation>
+    operations: FifoHeap<VariableOperation>,
 }
 
 #[derive(Debug)]
 enum ExpressionNode {
+    Assign,
+    LHS(String),
     Concatenate,
     GetVariable,
     Constant(String),
@@ -124,6 +173,15 @@ enum ExpressionNode {
 enum GraphItem {
     Variable(Variable),
     ExpressionNode(ExpressionNode),
+}
+
+impl GraphItem {
+    fn variable_mut(&mut self) -> &mut Variable {
+        match self {
+            GraphItem::Variable(v) => v,
+            _ => panic!("Expected GraphItem::Variable"),
+        }
+    }
 }
 
 impl GraphItem {
@@ -144,10 +202,10 @@ fn main() {
     let op = d.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Constant("value".into())));
 
     let v = d.ds.node_weight_mut(a).unwrap();
-    if let GraphItem::Variable(v) = v {
-        v.operations.push(VariableOperation {
-            idx: op,
-            op_type: VariableOperationType::Assign,
-        })
-    }
+    v.variable_mut().operations.push(VariableOperation {
+        idx: op,
+        op_type: VariableOperationType::Assign,
+    });
+
+    println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
