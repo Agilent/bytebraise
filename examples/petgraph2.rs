@@ -6,12 +6,12 @@ use std::collections::BinaryHeap;
 use once_cell::sync::Lazy;
 use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
-use regex::Regex;
+use regex::{Match, Regex};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
 static SETVAR_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)(?::(?P<add>[^A-Z]*))?$")
+    Regex::new(r"^(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)?(?P<add>:.*)?$")
         .unwrap()
 });
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
@@ -26,7 +26,7 @@ pub struct FifoHeap<T> {
 // TODO: varflags as separate variables?
 
 #[derive(Eq, PartialEq, Debug)]
-enum VariableOperationType {
+enum StmtKind {
     WeakDefault,
     Default,
     Assign,
@@ -39,35 +39,35 @@ enum VariableOperationType {
     Remove,
 }
 
-impl Ord for VariableOperationType {
+impl Ord for StmtKind {
     fn cmp(&self, other: &Self) -> Ordering {
         self.order_value().cmp(&other.order_value())
     }
 }
 
-impl PartialOrd for VariableOperationType {
+impl PartialOrd for StmtKind {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl VariableOperationType {
+impl StmtKind {
     fn order_value(&self) -> u8 {
         match self {
-            VariableOperationType::WeakDefault => 1,
-            VariableOperationType::Default => 2,
-            VariableOperationType::Assign | VariableOperationType::PlusEqual | VariableOperationType::EqualPlus
-            | VariableOperationType::DotEqual | VariableOperationType::EqualDot => 3,
-            VariableOperationType::Append => 4,
-            VariableOperationType::Prepend => 5,
-            VariableOperationType::Remove => 6,
+            StmtKind::WeakDefault => 1,
+            StmtKind::Default => 2,
+            StmtKind::Assign | StmtKind::PlusEqual | StmtKind::EqualPlus
+            | StmtKind::DotEqual | StmtKind::EqualDot => 3,
+            StmtKind::Append => 4,
+            StmtKind::Prepend => 5,
+            StmtKind::Remove => 6,
         }
     }
 }
 
 #[derive(Eq, PartialEq, Debug)]
 struct VariableOperation {
-    op_type: VariableOperationType,
+    op_type: StmtKind,
     idx: NodeIndex<DefaultIx>,
 }
 
@@ -117,40 +117,84 @@ impl DataSmart {
         }
     }
 
+    fn internalize_expression<S: Into<String>>(&mut self, value: S) -> NodeIndex<DefaultIx> {
+        let value = value.into();
+
+        self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Concatenate))
+    }
+
     pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
         let var = var.into();
         let value = value.into();
 
-        // Check for append/prepend/remove operation
-        if let Some(regex_match) = SETVAR_REGEX.captures(&var) {
-            // Base variable name, possibly with its own overrides. For example:
-            // P:class-target:append:arm yields:
-            //      base: P:class-target
-            //      keyword: :append
-            //      overrides: arm
-            let base = regex_match.name("base").unwrap().as_str();
-            let keyword = regex_match.name("keyword").unwrap().as_str();
-            let overridestr = regex_match.name("add").map(|o| o.as_str().to_string());
+        let regex_match = SETVAR_REGEX.captures(&var).unwrap();
+        let base = regex_match.name("base").unwrap().as_str();
 
-            let base_variable_index = self._get_or_create_var(var_name.clone());
-            let override_ = overridestr.map(|s| self._intern_expression(s));
-            let value = self._intern_expression(value.clone());
-            let base_variable_data = self.ds.node_weight_mut(base_variable_index).unwrap();
+        //println!("{:?}", regex_match);
 
-            let GraphItem::Variable(var) = base_variable_data else { panic!(); };
-            match keyword {
-                "_append" => {
-                    var.appends.push(Apr { override_, value });
-                }
-                "_prepend" => {
-                    var.prepends.push(Apr { override_, value });
-                }
-                "_remove" => {
-                    var.removes.push(Apr { override_, value });
-                }
-                _ => unreachable!()
-            }
-        }
+        let stmt_kind = match regex_match.name("keyword").map(|m| m.as_str()) {
+            None => StmtKind::Assign,
+            Some(":append") => StmtKind::Append,
+            Some(":prepend") => StmtKind::Prepend,
+            Some(":remove") => StmtKind::Remove,
+            Some(_) => unreachable!(),
+        };
+
+        let var_without_keyword = format!("{}{}", base, regex_match.name("add").map(|m| m.as_str()).unwrap_or_default());
+
+        let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
+            lhs: var_without_keyword,
+            kind: stmt_kind
+        }));
+
+        // TODO: parse expression
+        let expr_idx = self.internalize_expression(value);
+
+        let var_entry = self.vars.entry(base.to_string()).or_insert_with(|| {
+            self.ds.add_node(GraphItem::new_variable(base))
+        });
+
+        let var_data = self.ds.node_weight_mut(*var_entry).unwrap().variable_mut();
+
+        var_data.operations.push(VariableOperation {
+            op_type: StmtKind::Assign,
+            idx: stmt_idx,
+        });
+
+        self.ds.add_edge(stmt_idx, expr_idx, ());
+        self.ds.add_edge(*var_entry, stmt_idx, ());
+
+        //
+        // // Check for append/prepend/remove operation
+        // if let Some(regex_match) = SETVAR_REGEX.captures(&var) {
+        //     // Base variable name, possibly with its own overrides. For example:
+        //     // P:class-target:append:arm yields:
+        //     //      base: P:class-target
+        //     //      keyword: :append
+        //     //      overrides: arm
+        //     let base = regex_match.name("base").unwrap().as_str();
+        //     let keyword = regex_match.name("keyword").unwrap().as_str();
+        //     let overridestr = regex_match.name("add").map(|o| o.as_str().to_string());
+        //
+        //     let base_variable_index = self._get_or_create_var(var_name.clone());
+        //     let override_ = overridestr.map(|s| self._intern_expression(s));
+        //     let value = self._intern_expression(value.clone());
+        //     let base_variable_data = self.ds.node_weight_mut(base_variable_index).unwrap();
+        //
+        //     let GraphItem::Variable(var) = base_variable_data else { panic!(); };
+        //     match keyword {
+        //         "_append" => {
+        //             var.appends.push(Apr { override_, value });
+        //         }
+        //         "_prepend" => {
+        //             var.prepends.push(Apr { override_, value });
+        //         }
+        //         "_remove" => {
+        //             var.removes.push(Apr { override_, value });
+        //         }
+        //         _ => unreachable!()
+        //     }
+        // }
     }
 }
 
@@ -162,17 +206,22 @@ struct Variable {
 
 #[derive(Debug)]
 enum ExpressionNode {
-    Assign,
-    LHS(String),
     Concatenate,
-    GetVariable,
+    GetVariable(String),
     Constant(String),
+}
+
+#[derive(Debug)]
+struct StmtNode {
+    kind: StmtKind,
+    lhs: String,
 }
 
 #[derive(Debug)]
 enum GraphItem {
     Variable(Variable),
     ExpressionNode(ExpressionNode),
+    StmtNode(StmtNode),
 }
 
 impl GraphItem {
@@ -196,16 +245,7 @@ impl GraphItem {
 fn main() {
     let mut d = DataSmart::new();
 
-    let a = d.ds.add_node(GraphItem::new_variable("A"));
-    d.vars.insert("A".into(), a);
-
-    let op = d.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Constant("value".into())));
-
-    let v = d.ds.node_weight_mut(a).unwrap();
-    v.variable_mut().operations.push(VariableOperation {
-        idx: op,
-        op_type: VariableOperationType::Assign,
-    });
+    d.set_var("FILES:append:lib${BPN}z", "${libdir}/ok.so");
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
