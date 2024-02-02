@@ -1,0 +1,12 @@
+number = {            // To recognize a number...
+    ASCII_DIGIT+      //   take as many ASCII digits as possible (at least one).
+}
+
+get_var = {
+    "${"
+}
+
+expression = {        // To recognize an expression...
+    number            //   first try to take a number...
+    | "true"          //   or, if that fails, the string "true".
+}

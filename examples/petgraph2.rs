@@ -248,29 +248,65 @@ impl GraphItem {
     }
 }
 
-use peg;
-
-peg::parser! {
-  grammar list_parser() for str {
-    rule var() -> String
-        = s:$((['a'..='z' | 'A'..='Z'])+) { s.to_string() }
-
-    pub rule value() -> Vec<String>
-        = "${" s:(var()) "}" {vec![s]}
-
-    rule whitespace() -> Vec<String>
-        = s:$([' ' | '\n' | '\t']+) { vec![s.to_string()] }
-
-    rule constant() -> Vec<String>
-        = s:$([_]+) { vec![format!("CONST: '{}'", s)]}
-
-    pub rule indirection() -> Vec<String>
-        = "${" p:$(['A'..='Z']*) s:(value()) "}" { vec![vec!["IND".to_string(), p.to_string()], s].into_iter().flatten().collect() }
-
-    pub rule expand() -> Vec<Vec<String>>
-        = l:(value() / indirection() / whitespace() / constant() )* { l }
-  }
+enum ToyNode {
+    GetVariable(String),
+    Indirection(Box<ToyNode>),
+    Concatenate(Vec<Box<ToyNode>>),
+    Constant(String),
+    Python(String),
 }
+
+
+
+fn parse_value<S: Into<String>>(val: S) -> ToyNode {
+    let input = val.into();
+
+    let mut result = Vec::new();
+    let mut last_end = 0;
+
+    // Iterate over all matches
+    for mat in VAR_EXPANSION_REGEX.find_iter(&input) {
+        let (start, end) = (mat.start(), mat.end());
+
+        // Check if there's a non-matching portion before the current match
+        if start > last_end {
+            // Add the non-matching portion to the result
+            result.push((input[last_end..start].to_string(), false));
+        }
+
+        // Add the current match to the result
+        result.push((mat.as_str().to_string(), true));
+
+        last_end = end;
+    }
+
+    // Check if there's any remaining non-matching portion at the end
+    if last_end < input.len() {
+        result.push((input[last_end..].to_string(), false));
+    }
+
+    dbg!(result);
+
+    panic!();
+    //return ToyNode::Concatenate(result);
+}
+
+use nom::{
+    IResult,
+    sequence::delimited,
+    // see the "streaming/complete" paragraph lower for an explanation of these submodules
+    character::complete::char,
+    bytes::complete::is_not
+};
+use nom::bytes::complete::{tag, take_while};
+use nom::character::is_alphabetic;
+use nom::error::ErrorKind;
+use nom_regex::str::re_match;
+
+fn alpha(s: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while(is_alphabetic)(s)
+}
+
 
 fn main() {
     let mut d = DataSmart::new();
@@ -278,7 +314,13 @@ fn main() {
     d.set_var("FILES", "");
     d.set_var("FILES:append:lib${BPN}z", "${libdir}/ok.so");
 
-    assert_eq!(list_parser::expand("${${${M}}}"), Ok(vec![vec!["OK".to_string()]]));
+    //parse_value("${${M}}");
+
+    let input = "${M}";
+    let re = Regex::new(r"\$\{[a-zA-Z0-9\-_+/~]+?}").unwrap();
+    let mut parens = re_match::<(&str, ErrorKind)>(re);
+    let output = parens(input);
+    dbg!(output);
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
