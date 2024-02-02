@@ -41,6 +41,8 @@ python-parser = { version = "0.2.0", optional = true }
 
 lalrpop-util = { version = "0.20.0", features = ["lexer", "unicode"] }
 
+peg = "0.8.2"
+
 [build-dependencies]
 lalrpop = "0.20.0"
 

@@ -248,7 +248,29 @@ impl GraphItem {
     }
 }
 
-use crate::value::ExprParser;
+use peg;
+
+peg::parser! {
+  grammar list_parser() for str {
+    rule var() -> String
+        = s:$((['a'..='z' | 'A'..='Z'])+) { s.to_string() }
+
+    pub rule value() -> Vec<String>
+        = "${" s:(var()) "}" {vec![s]}
+
+    rule whitespace() -> Vec<String>
+        = s:$([' ' | '\n' | '\t']+) { vec![s.to_string()] }
+
+    rule constant() -> Vec<String>
+        = s:$([_]+) { vec![format!("CONST: '{}'", s)]}
+
+    pub rule indirection() -> Vec<String>
+        = "${" p:$(['A'..='Z']*) s:(value()) "}" { vec![vec!["IND".to_string(), p.to_string()], s].into_iter().flatten().collect() }
+
+    pub rule expand() -> Vec<Vec<String>>
+        = l:(value() / indirection() / whitespace() / constant() )* { l }
+  }
+}
 
 fn main() {
     let mut d = DataSmart::new();
@@ -256,12 +278,7 @@ fn main() {
     d.set_var("FILES", "");
     d.set_var("FILES:append:lib${BPN}z", "${libdir}/ok.so");
 
-    //println!("{:?}", d.get_var("FILES"));
-    let expr = ExprParser::new()
-        .parse("22 * 44 + 66")
-        .unwrap();
-    eprintln!("{:#?}", expr);
-    assert_eq!(&format!("{:?}", expr), "((22 * 44) + 66)");
+    assert_eq!(list_parser::expand("${${${M}}}"), Ok(vec![vec!["OK".to_string()]]));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
