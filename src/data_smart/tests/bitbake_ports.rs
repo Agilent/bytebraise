@@ -264,6 +264,7 @@ mod nested_expansions {
                 .ok_or(DataSmartError::UnwrapNoneError)?,
             "187"
         );
+        panic!();
     });
 
     #[cfg(feature = "python")]

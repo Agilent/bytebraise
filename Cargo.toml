@@ -39,6 +39,10 @@ unicode-segmentation = "1"
 pyo3 = { version = "0.18.3", features = ["auto-initialize", "anyhow"], optional = true }
 python-parser = { version = "0.2.0", optional = true }
 
+lalrpop-util = { version = "0.20.0", features = ["lexer", "unicode"] }
+
+[build-dependencies]
+lalrpop = "0.20.0"
 
 [features]
 default = []

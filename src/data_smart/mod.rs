@@ -299,6 +299,7 @@ impl DataSmartInner {
         while value.contains("${") {
             let new_value =
                 VAR_EXPANSION_REGEX.replace_fallible(value.as_ref(), |caps: &Captures| {
+                    eprintln!("{:?}", caps);
                     let match_str = caps.get(0).unwrap().as_str();
                     let referenced_var = &match_str[2..match_str.len() - 1];
 

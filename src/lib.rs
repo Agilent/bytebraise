@@ -12,5 +12,6 @@ pub mod python;
 pub mod split_var_value;
 pub mod syntax;
 pub mod utils;
+pub mod ast;
 
 pub type ByteBraiseResult<T> = anyhow::Result<T>;
