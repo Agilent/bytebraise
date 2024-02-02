@@ -120,7 +120,20 @@ impl DataSmart {
     fn internalize_expression<S: Into<String>>(&mut self, value: S) -> NodeIndex<DefaultIx> {
         let value = value.into();
 
-        self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Concatenate))
+        let caps = VAR_EXPANSION_REGEX.captures_iter(&value);
+        for cap in caps {
+            //println!("{:?}", cap);
+        }
+
+        let left = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::GetVariable("${libdir}".into())));
+        let right = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Constant("/ok.so".into())));
+
+        let concat_node = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Concatenate(vec![left, right])));
+
+        self.ds.add_edge(concat_node, left, ());
+        self.ds.add_edge(concat_node, right, ());
+
+        concat_node
     }
 
     pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
@@ -206,7 +219,7 @@ struct Variable {
 
 #[derive(Debug)]
 enum ExpressionNode {
-    Concatenate,
+    Concatenate(Vec<NodeIndex<DefaultIx>>),
     GetVariable(String),
     Constant(String),
 }
