@@ -3,7 +3,6 @@ use bytebraise::ast::{Expression};
 
 grammar;
 
-
 // Define Expression as a choice between simple expressions and concatenation
 pub Expression: Box<Expression> = {
     SimpleExpression,
@@ -27,11 +26,11 @@ Concatenate: Box<Expression> = {
 
 // Definitions for Indirection and Expansion remain the same
 Indirection: Box<Expression> = {
-    "${" <e:Expansion> "}" => Box::new(Expression::Indirection(e))
+    "${" <e:Expression> "}" => Box::new(Expression::Indirection(e))
 }
 
 Expansion: Box<Expression> = {
-    "${" <v:r"[a-zA-Z0-9\\-_+./~]+?"> "}" => Box::new(Expression::Expansion(String::from(v)))
+    <v:r"\$\{[a-zA-Z0-9\\-_+./~]+?\}"> => Box::new(Expression::Expansion(String::from(v)))
 }
 
 PythonExpansion: Box<Expression> = {

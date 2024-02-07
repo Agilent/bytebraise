@@ -9,5 +9,5 @@ fn run_case(input: &str) {
 }
 
 fn main() {
-    run_case("${A}${${22}}${B}${@OK}");
+    run_case("${A}${${${22}}}${B}${@OK}");
 }

@@ -6,6 +6,7 @@ pub enum Expression {
     Expansion(String),
     Indirection(Box<Expression>),
     PythonExpansion(String),
+    Literal(String),
 }
 
 impl Debug for Expression {
@@ -18,6 +19,7 @@ impl Debug for Expression {
             Expansion(ref var) => write!(fmt, "GetVar({})", var),
             Indirection(ref expr) => write!(fmt, "Indirection({:?})", expr),
             PythonExpansion(ref p) => write!(fmt, "Python({})", p),
+            Literal(ref s) => write!(fmt, "Literal('{}')", s),
         }
     }
 }
