@@ -9,10 +9,6 @@ use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::Regex;
 
-use lalrpop_util::lalrpop_mod;
-
-lalrpop_mod!(pub value); // synthesized by LALRPOP
-
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -36,9 +32,8 @@ pub struct FifoHeap<T> {
 //  P = ""
 //  P:test = "append"
 //  A:${P:test} = "OK2"
-//
-//  BUT thankfully we don't need to factor this into execution operation of statements. i.e.
-//  our binary heap approach still works :)
+//    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
+//    our binary heap approach still works :)
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 enum StmtKind {
     WeakDefault,
@@ -291,36 +286,13 @@ fn parse_value<S: Into<String>>(val: S) -> ToyNode {
     //return ToyNode::Concatenate(result);
 }
 
-use nom::{
-    IResult,
-    sequence::delimited,
-    // see the "streaming/complete" paragraph lower for an explanation of these submodules
-    character::complete::char,
-    bytes::complete::is_not
-};
-use nom::bytes::complete::{tag, take_while};
-use nom::character::is_alphabetic;
-use nom::error::ErrorKind;
-use nom_regex::str::re_match;
-
-fn alpha(s: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_alphabetic)(s)
-}
-
-
 fn main() {
     let mut d = DataSmart::new();
 
     d.set_var("FILES", "");
     d.set_var("FILES:append:lib${BPN}z", "${libdir}/ok.so");
 
-    //parse_value("${${M}}");
-
-    let input = "${M}";
-    let re = Regex::new(r"\$\{[a-zA-Z0-9\-_+/~]+?}").unwrap();
-    let mut parens = re_match::<(&str, ErrorKind)>(re);
-    let output = parens(input);
-    dbg!(output);
+    parse_value("${${M}}");
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }

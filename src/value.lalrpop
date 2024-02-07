@@ -1,33 +1,39 @@
 use std::str::FromStr;
-use bytebraise::ast::{Expr, Opcode};
+use bytebraise::ast::{Expression};
 
 grammar;
 
-pub Expr: Box<Expr> = { // (1)
-    Expr ExprOp Factor => Box::new(Expr::Op(<>)), // (2)
-    Factor,
-};
 
-ExprOp: Opcode = { // (3)
-    "+" => Opcode::Add,
-    "-" => Opcode::Sub,
-};
+// Define Expression as a choice between simple expressions and concatenation
+pub Expression: Box<Expression> = {
+    SimpleExpression,
+    Concatenate,
+}
 
-Factor: Box<Expr> = {
-    Factor FactorOp Term => Box::new(Expr::Op(<>)),
-    Term,
-};
+// Define SimpleExpression to include Indirection, Expansion, and other non-concatenated forms
+SimpleExpression: Box<Expression> = {
+    Indirection,
+    Expansion,
+    PythonExpansion,
+    // Potentially other non-concatenated expressions
+}
 
-FactorOp: Opcode = {
-    "*" => Opcode::Mul,
-    "/" => Opcode::Div,
-};
+// Redefine Concatenate to explicitly handle the concatenation
+Concatenate: Box<Expression> = {
+    SimpleExpression SimpleExpression => Box::new(Expression::Concatenate(vec![<>])),
+    Concatenate SimpleExpression => Box::new(Expression::Concatenate(vec![<>])),
+    // This setup assumes Concatenate handles multiple expressions explicitly
+}
 
-Term: Box<Expr> = {
-    Num => Box::new(Expr::Number(<>)),
-    "(" <Expr> ")"
-};
+// Definitions for Indirection and Expansion remain the same
+Indirection: Box<Expression> = {
+    "${" <e:Expansion> "}" => Box::new(Expression::Indirection(e))
+}
 
-Num: i32 = {
-    r"[0-9]+" => i32::from_str(<>).unwrap()
-};
+Expansion: Box<Expression> = {
+    "${" <v:r"[a-zA-Z0-9\\-_+./~]+?"> "}" => Box::new(Expression::Expansion(String::from(v)))
+}
+
+PythonExpansion: Box<Expression> = {
+    <p:r"\$\{@.+?\}"> => Box::new(Expression::PythonExpansion(String::from(p)))
+}

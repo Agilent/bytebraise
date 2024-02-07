@@ -1,55 +1,46 @@
 use std::fmt::{Debug, Error, Formatter};
+use itertools::Itertools;
 
-pub enum Expr {
-    Number(i32),
-    Op(Box<Expr>, Opcode, Box<Expr>),
-    Error,
+pub enum Expression {
+    Concatenate(Vec<Box<Expression>>),
+    Expansion(String),
+    Indirection(Box<Expression>),
+    PythonExpansion(String),
 }
 
-pub enum ExprSymbol<'input> {
-    NumSymbol(&'input str),
-    Op(Box<ExprSymbol<'input>>, Opcode, Box<ExprSymbol<'input>>),
-    Error,
-}
-
-#[derive(Copy, Clone)]
-pub enum Opcode {
-    Mul,
-    Div,
-    Add,
-    Sub,
-}
-
-impl Debug for Expr {
+impl Debug for Expression {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        use self::Expr::*;
+        use self::Expression::*;
         match *self {
-            Number(n) => write!(fmt, "{:?}", n),
-            Op(ref l, op, ref r) => write!(fmt, "({:?} {:?} {:?})", l, op, r),
-            Error => write!(fmt, "error"),
+            Concatenate(ref exprs) => {
+                write!(fmt, "Concatenate({})", exprs.into_iter().map( |v| format!("{:?}", v)).join(", "))
+            }
+            Expansion(ref var) => write!(fmt, "GetVar({})", var),
+            Indirection(ref expr) => write!(fmt, "Indirection({:?})", expr),
+            PythonExpansion(ref p) => write!(fmt, "Python({})", p),
         }
     }
 }
-
-impl<'input> Debug for ExprSymbol<'input> {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        use self::ExprSymbol::*;
-        match *self {
-            NumSymbol(n) => write!(fmt, "{:?}", n),
-            Op(ref l, op, ref r) => write!(fmt, "({:?} {:?} {:?})", l, op, r),
-            Error => write!(fmt, "error"),
-        }
-    }
-}
-
-impl Debug for Opcode {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        use self::Opcode::*;
-        match *self {
-            Mul => write!(fmt, "*"),
-            Div => write!(fmt, "/"),
-            Add => write!(fmt, "+"),
-            Sub => write!(fmt, "-"),
-        }
-    }
-}
+//
+// impl<'input> Debug for ExprSymbol<'input> {
+//     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+//         use self::ExprSymbol::*;
+//         match *self {
+//             NumSymbol(n) => write!(fmt, "{:?}", n),
+//             Op(ref l, op, ref r) => write!(fmt, "({:?} {:?} {:?})", l, op, r),
+//             Error => write!(fmt, "error"),
+//         }
+//     }
+// }
+//
+// impl Debug for Opcode {
+//     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
+//         use self::Opcode::*;
+//         match *self {
+//             Mul => write!(fmt, "*"),
+//             Div => write!(fmt, "/"),
+//             Add => write!(fmt, "+"),
+//             Sub => write!(fmt, "-"),
+//         }
+//     }
+// }
