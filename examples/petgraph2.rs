@@ -216,6 +216,7 @@ enum ExpressionNode {
 struct StmtNode {
     kind: StmtKind,
     lhs: String,
+
 }
 
 #[derive(Debug)]
@@ -289,10 +290,10 @@ fn parse_value<S: Into<String>>(val: S) -> ToyNode {
 fn main() {
     let mut d = DataSmart::new();
 
-    d.set_var("FILES", "");
-    d.set_var("FILES:append:lib${BPN}z", "${libdir}/ok.so");
+    d.set_var("A:append:${B}", "C");
+    d.set_var("A:${B}", "D");
 
-    parse_value("${${M}}");
+    //parse_value("${${M}}");
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
