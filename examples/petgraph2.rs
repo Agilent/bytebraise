@@ -245,7 +245,7 @@ impl DataSmart {
         let var = var.as_ref();
 
         let var_entry = self.vars.get(var)?;
-        println!("{:?}", self.ds.node_weight(*var_entry));
+        //println!("{:?}", self.ds.node_weight(*var_entry));
 
         let mut ret: Option<String> = None;
 
@@ -256,20 +256,31 @@ impl DataSmart {
             return cached.clone();
         }
 
+        let overrides = self.get_var("OVERRIDES");
+
         for op in var_data.operations.heap.iter() {
             let index = op.0.idx;
-            let q = self.ds.node_weight(index).unwrap();
-            println!("\top = {:?}", op);
-            println!("\t{:?}", q);
+            let q = self.ds.node_weight(index).unwrap().statement();
 
+            println!("{}", q.lhs);
             match op.0.op_type {
                 StmtKind::Append => {
-                    ret = ret.map(|s| {
-                        s + " " + &*q.statement().rhs.clone()
-                    });
+                    if q.lhs.is_empty() {
+                        ret = ret.map(|s| {
+                            s + " " + &*q.rhs.clone()
+                        });
+                    } else {
+                        let override_str = self.expand(q.lhs.as_str()).unwrap();
+                        eprintln!("expanded = {}", override_str);
+                    }
                 }
                 StmtKind::Assign => {
-                    ret = q.statement().rhs.clone().into();
+                    if q.lhs.is_empty() {
+                        ret = q.rhs.clone().into();
+                    } else {
+                        let override_str = self.expand(q.lhs.as_str()).unwrap();
+                        eprintln!("expanded = {}", override_str);
+                    }
                 }
                 _ => unimplemented!()
             }
@@ -380,17 +391,26 @@ fn parse_value<S: Into<String>>(val: S) -> ToyNode {
 fn main() {
     let mut d = DataSmart::new();
 
+    // ABIEXTENSION ??= ""
+    // ABIEXTENSION_class-nativesdk = ""
+    // CLASSOVERRIDE ?= "class-target"
+    // TARGET_OS = "linux${LIBCEXTENSION}${ABIEXTENSION}"
+    // OVERRIDES = "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable"
+
+    d.set_var("TARGET_OS", "linux${LIBCEXTENSION}${ABIEXTENSION}");
+    d.set_var("TRANSLATED_TARGET_ARCH", "wat");
+    d.set_var("PN", "waves");
+    d.set_var("B", "pn-waves");
     d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
+
     d.set_var("A:append:${B}", "C");
     d.set_var("A:${B}", "D");
 
     //parse_value("${${M}}");
 
     println!("\n");
-    let ret = d.get_var("OVERRIDES");
-    println!("\n");
-
-    println!("ret = {:?}\n", ret);
+    println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
+    println!("A = {:?}\n", d.get_var("A"));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
