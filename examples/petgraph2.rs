@@ -1,5 +1,6 @@
+use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::BTreeSet;
 
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
@@ -8,7 +9,6 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::Regex;
-
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -25,7 +25,7 @@ static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {
     seq: usize,
-    heap: BinaryHeap<(T, usize)>,
+    heap: BTreeSet<(T, usize)>,
 }
 
 // TODO: An 'assign' may actually act as an 'append' (or others) e.g.
@@ -96,19 +96,14 @@ impl<T: Ord> FifoHeap<T> {
     pub fn new() -> Self {
         FifoHeap {
             seq: usize::MAX,
-            heap: BinaryHeap::new(),
+            heap: BTreeSet::new(),
         }
     }
 
     pub fn push(&mut self, val: T) {
         let seq = self.seq.checked_sub(1).unwrap();
         self.seq = seq;
-        self.heap.push((val, seq));
-    }
-
-    pub fn pop(&mut self) -> Option<T> {
-        let (val, _) = self.heap.pop()?;
-        Some(val)
+        self.heap.insert((val, seq));
     }
 }
 
@@ -124,25 +119,6 @@ impl DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
         }
-    }
-
-    fn internalize_expression<S: Into<String>>(&mut self, value: S) -> NodeIndex<DefaultIx> {
-        let value = value.into();
-
-        let caps = VAR_EXPANSION_REGEX.captures_iter(&value);
-        for cap in caps {
-            //println!("{:?}", cap);
-        }
-
-        let left = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::GetVariable("${libdir}".into())));
-        let right = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Constant("/ok.so".into())));
-
-        let concat_node = self.ds.add_node(GraphItem::ExpressionNode(ExpressionNode::Concatenate(vec![left, right])));
-
-        self.ds.add_edge(concat_node, left, ());
-        self.ds.add_edge(concat_node, right, ());
-
-        concat_node
     }
 
     pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
@@ -167,10 +143,8 @@ impl DataSmart {
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             lhs: var_without_keyword,
             kind: stmt_kind,
+            rhs: value,
         }));
-
-        // TODO: parse expression
-        let expr_idx = self.internalize_expression(value);
 
         let var_entry = self.vars.entry(base.to_string()).or_insert_with(|| {
             self.ds.add_node(GraphItem::new_variable(base))
@@ -183,7 +157,6 @@ impl DataSmart {
             idx: stmt_idx,
         });
 
-        self.ds.add_edge(stmt_idx, expr_idx, ());
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
 
@@ -191,8 +164,39 @@ impl DataSmart {
         let var = var.as_ref();
 
         let var_entry = self.vars.get(var)?;
+        println!("{:?}", self.ds.node_weight(*var_entry));
 
-        None
+        let mut ret: Option<String> = None;
+
+        let w = self.ds.node_weight(*var_entry).unwrap();
+        let var_data = w.variable();
+        let mut cached = RefCell::borrow_mut(&var_data.cached_value);
+        if cached.is_some() {
+            return cached.clone();
+        }
+
+        for op in var_data.operations.heap.iter() {
+            let index = op.0.idx;
+            let q = self.ds.node_weight(index).unwrap();
+            println!("\top = {:?}", op);
+            println!("\t{:?}", q);
+
+            match op.0.op_type {
+                StmtKind::Append => {
+                    ret = ret.map(|s| {
+                        s + " " + &*q.statement().rhs.clone()
+                    });
+                },
+                StmtKind::Assign => {
+                    ret = q.statement().rhs.clone().into();
+                },
+                _ => unimplemented!()
+            }
+        }
+
+        *cached = ret.clone();
+
+        ret
     }
 }
 
@@ -200,29 +204,19 @@ impl DataSmart {
 struct Variable {
     name: String,
     operations: FifoHeap<VariableOperation>,
-}
-
-#[derive(Debug)]
-enum ExpressionNode {
-    Concatenate(Vec<NodeIndex<DefaultIx>>),
-    GetVariable(String),
-    Constant(String),
-    Python(String),
-    // e.g. ${${A}}
-    Indirection(NodeIndex<DefaultIx>),
+    cached_value: RefCell<Option<String>>,
 }
 
 #[derive(Debug)]
 struct StmtNode {
     kind: StmtKind,
     lhs: String,
-
+    rhs: String,
 }
 
 #[derive(Debug)]
 enum GraphItem {
     Variable(Variable),
-    ExpressionNode(ExpressionNode),
     StmtNode(StmtNode),
 }
 
@@ -233,6 +227,20 @@ impl GraphItem {
             _ => panic!("Expected GraphItem::Variable"),
         }
     }
+
+    fn variable(&self) -> &Variable {
+        match self {
+            GraphItem::Variable(v) => v,
+            _ => panic!("Expected GraphItem::Variable"),
+        }
+    }
+
+    fn statement(&self) -> &StmtNode {
+        match self {
+            GraphItem::StmtNode(stmt) => stmt,
+            _ => panic!("Expected GraphItem::Statement"),
+        }
+    }
 }
 
 impl GraphItem {
@@ -240,6 +248,7 @@ impl GraphItem {
         GraphItem::Variable(Variable {
             name: name.into(),
             operations: FifoHeap::new(),
+            cached_value: RefCell::new(None),
         })
     }
 }
@@ -251,7 +260,6 @@ enum ToyNode {
     Constant(String),
     Python(String),
 }
-
 
 
 fn parse_value<S: Into<String>>(val: S) -> ToyNode {
@@ -290,10 +298,17 @@ fn parse_value<S: Into<String>>(val: S) -> ToyNode {
 fn main() {
     let mut d = DataSmart::new();
 
+    d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
     d.set_var("A:append:${B}", "C");
     d.set_var("A:${B}", "D");
 
     //parse_value("${${M}}");
+
+    println!("\n");
+    let ret = d.get_var("A");
+    println!("\n");
+
+    println!("ret = {:?}", ret);
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
