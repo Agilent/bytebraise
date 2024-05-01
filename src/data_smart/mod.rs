@@ -507,6 +507,7 @@ impl DataSmartInner {
             }
 
             if let Some(the_match) = the_match {
+                panic!("{}", the_match);
                 if let Some((value_inner, subparser)) = self.get_var_flag_with_parser(
                     the_match.as_str(),
                     "_content",

@@ -42,7 +42,7 @@ pub struct FifoHeap<T> {
 //  A:${P:test} = "OK2"
 //    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
 //    our binary heap approach still works :)
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Display)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 enum StmtKind {
     WeakDefault,
     Default,
@@ -103,13 +103,13 @@ impl PartialOrd for VariableOperation {
 impl<T: Ord> FifoHeap<T> {
     pub fn new() -> Self {
         FifoHeap {
-            seq: usize::MAX,
+            seq: usize::MIN,
             heap: BTreeSet::new(),
         }
     }
 
     pub fn push(&mut self, val: T) {
-        let seq = self.seq.checked_sub(1).unwrap();
+        let seq = self.seq.checked_add(1).unwrap();
         self.seq = seq;
         self.heap.insert((val, seq));
     }
@@ -304,11 +304,7 @@ impl DataSmart {
 
         //let overrides = self.get_var("OVERRIDES");
 
-        for op in &var_data.operations.heap.iter().group_by(|k| k.0.op_type) {
-            eprintln!("Process stmt: {}", op.0);
-
-            
-
+        for op in var_data.operations.heap.iter() {
             let index = op.0.idx;
             let q = self.ds.node_weight(index).unwrap().statement();
 
@@ -334,7 +330,7 @@ impl DataSmart {
                 }
                 StmtKind::Assign => {
                     if run {
-                        eprintln!("= {}", q.rhs);
+                        eprintln!("= {}, {}", q.rhs, op.1);
                         ret = q.rhs.clone().into();
                     }
                 }
