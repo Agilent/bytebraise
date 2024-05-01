@@ -466,9 +466,9 @@ impl DataSmartInner {
             self.need_overrides()?;
 
             {
-                // We may have been called by |needs_overrides| so guard against None
-                // TODO: shouldn't this be try_borrow?
                 let override_state = RefCell::borrow(&self.override_state);
+
+                // We may have been called by |needs_overrides| so guard against None
                 if let Some(active_overrides) = &override_state.active_overrides {
                     let mut active_override_to_full_var_map = HashMap::new();
 

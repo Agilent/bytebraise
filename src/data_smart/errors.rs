@@ -28,7 +28,7 @@ pub enum DataSmartError {
     #[cfg(feature = "python")]
     PythonSyntaxError { source: pyo3::PyErr },
 
-    #[error("A variable references itself")]
+    #[error("A variable {var:?} references itself")]
     RecursiveReferenceError { var: String },
 }
 

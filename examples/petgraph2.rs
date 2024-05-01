@@ -2,9 +2,11 @@ use std::borrow::Cow;
 use std::cell::{RefCell};
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
+use std::ops::Deref;
 
 use anyhow::Context;
 use fxhash::FxHashMap;
+use indexmap::IndexSet;
 use once_cell::sync::Lazy;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -13,7 +15,7 @@ use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
-use bytebraise::data_smart::utils::ReplaceFallible;
+use bytebraise::data_smart::utils::{replace_all, split_filter_empty};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -125,11 +127,17 @@ impl ExpansionState {
     }
 }
 
+struct OverrideState {
+
+}
+
 #[derive(Debug)]
 struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
+    active_overrides: RefCell<Option<IndexSet<String>>>,
+    inside_compute_overrides: RefCell<()>,
 }
 
 impl DataSmart {
@@ -138,6 +146,8 @@ impl DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
             expand_state: RefCell::new(None),
+            active_overrides: RefCell::new(Some(IndexSet::new())),
+            inside_compute_overrides: RefCell::new(()),
         }
     }
 
@@ -206,10 +216,12 @@ impl DataSmart {
 
         let mut value = value.to_string();
         while value.contains("${") {
-            let new_value = VAR_EXPANSION_REGEX.replace_fallible(value.as_ref(), |caps: &Captures| -> DataSmartResult<String> {
+            println!("EXPAND: {}", value);
+            let new_value = replace_all(&*VAR_EXPANSION_REGEX, value.as_str(), |caps: &Captures| -> DataSmartResult<String> {
                 let match_str = caps.get(0).unwrap().as_str();
                 let referenced_var = &match_str[2..match_str.len() - 1];
 
+                println!("\texpand: {}", referenced_var);
                 {
                     let mut s = RefCell::borrow_mut(&self.expand_state);
                     let set = s.as_mut().unwrap();
@@ -241,45 +253,78 @@ impl DataSmart {
         Ok(value)
     }
 
+    fn compute_overrides(&self) -> DataSmartResult<()> {
+        if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
+            for _i in 0..5 {
+                eprintln!("++++ override iteration {}", _i);
+                let s = split_filter_empty(&self.get_var("OVERRIDES").unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+
+                *RefCell::borrow_mut(&self.active_overrides) = Some(s);
+
+                let s2 = split_filter_empty(&self.get_var("OVERRIDES").unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+
+                if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
+                    return Ok(());
+                }
+
+                *RefCell::borrow_mut(&self.active_overrides) = Some(s2);
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
         let var = var.as_ref();
 
         let var_entry = self.vars.get(var)?;
-        //println!("{:?}", self.ds.node_weight(*var_entry));
+        println!("get_var = {}", var);
 
         let mut ret: Option<String> = None;
 
         let w = self.ds.node_weight(*var_entry).unwrap();
         let var_data = w.variable();
-        let mut cached = RefCell::borrow_mut(&var_data.cached_value);
-        if cached.is_some() {
-            return cached.clone();
+
+        if var != "OVERRIDES" {
+            let mut cached = RefCell::borrow_mut(&var_data.cached_value);
+            if cached.is_some() {
+                return cached.clone();
+            }
         }
 
-        let overrides = self.get_var("OVERRIDES");
+        self.compute_overrides().unwrap();
+
+        let override_state = &*RefCell::borrow(&self.active_overrides);
+
+        //let overrides = self.get_var("OVERRIDES");
 
         for op in var_data.operations.heap.iter() {
             let index = op.0.idx;
             let q = self.ds.node_weight(index).unwrap().statement();
 
-            println!("{}", q.lhs);
+            let mut run = false;
+            if q.lhs.is_empty() {
+                run = true;
+            } else {
+                let operation_overrides = split_filter_empty(&q.lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                if let Some(overrides) = override_state {
+                    if operation_overrides.is_subset(overrides) {
+                        run = true;
+                    }
+                }
+            }
+
             match op.0.op_type {
                 StmtKind::Append => {
-                    if q.lhs.is_empty() {
+                    if run {
                         ret = ret.map(|s| {
                             s + " " + &*q.rhs.clone()
                         });
-                    } else {
-                        let override_str = self.expand(q.lhs.as_str()).unwrap();
-                        eprintln!("expanded = {}", override_str);
                     }
                 }
                 StmtKind::Assign => {
-                    if q.lhs.is_empty() {
+                    if run {
                         ret = q.rhs.clone().into();
-                    } else {
-                        let override_str = self.expand(q.lhs.as_str()).unwrap();
-                        eprintln!("expanded = {}", override_str);
                     }
                 }
                 _ => unimplemented!()
@@ -287,7 +332,7 @@ impl DataSmart {
         }
 
         ret = ret.map(|s| self.expand(s).unwrap());
-        *cached = ret.clone();
+        //*cached = ret.clone();
 
         ret
     }
@@ -298,6 +343,7 @@ struct Variable {
     name: String,
     operations: FifoHeap<VariableOperation>,
     cached_value: RefCell<Option<String>>,
+    // TODO: iterative cache for OVERRIDES
 }
 
 #[derive(Debug)]
@@ -397,10 +443,14 @@ fn main() {
     // TARGET_OS = "linux${LIBCEXTENSION}${ABIEXTENSION}"
     // OVERRIDES = "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable"
 
+    d.set_var("ABIEXTENSION", "");
+    d.set_var("ABIEXTENSION:class-nativesdk", "wat");
+    d.set_var("CLASSOVERRIDE", "class-nativesdk");
     d.set_var("TARGET_OS", "linux${LIBCEXTENSION}${ABIEXTENSION}");
-    d.set_var("TRANSLATED_TARGET_ARCH", "wat");
-    d.set_var("PN", "waves");
-    d.set_var("B", "pn-waves");
+    d.set_var("LIBCOVERRIDE", "");
+    //d.set_var("TRANSLATED_TARGET_ARCH", "wat");
+    //d.set_var("PN", "waves");
+    //d.set_var("B", "pn-waves");
     d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
 
     d.set_var("A:append:${B}", "C");
@@ -409,8 +459,8 @@ fn main() {
     //parse_value("${${M}}");
 
     println!("\n");
-    println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("A = {:?}\n", d.get_var("A"));
+    //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
+    println!("TARGET_OS = {:?}\n", d.get_var("TARGET_OS"));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
