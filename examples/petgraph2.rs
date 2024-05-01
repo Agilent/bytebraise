@@ -7,6 +7,7 @@ use std::ops::Deref;
 use anyhow::Context;
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -41,7 +42,7 @@ pub struct FifoHeap<T> {
 //  A:${P:test} = "OK2"
 //    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
 //    our binary heap approach still works :)
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Display)]
 enum StmtKind {
     WeakDefault,
     Default,
@@ -303,7 +304,11 @@ impl DataSmart {
 
         //let overrides = self.get_var("OVERRIDES");
 
-        for op in var_data.operations.heap.iter() {
+        for op in &var_data.operations.heap.iter().group_by(|k| k.0.op_type) {
+            eprintln!("Process stmt: {}", op.0);
+
+            
+
             let index = op.0.idx;
             let q = self.ds.node_weight(index).unwrap().statement();
 
