@@ -305,6 +305,7 @@ impl DataSmart {
         //let overrides = self.get_var("OVERRIDES");
 
         for op in var_data.operations.heap.iter() {
+            eprintln!("||||| {:?}", op);
             let index = op.0.idx;
             let q = self.ds.node_weight(index).unwrap().statement();
 
@@ -312,9 +313,12 @@ impl DataSmart {
             if q.lhs.is_empty() {
                 run = true;
             } else {
-                let operation_overrides = split_filter_empty(&q.lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                let expanded_lhs = self.expand(&q.lhs, level + 1).unwrap();
+                eprintln!("{:?}", expanded_lhs);
+                let operation_overrides = split_filter_empty(&expanded_lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
                 if let Some(overrides) = override_state {
                     if operation_overrides.is_subset(overrides) {
+                        // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
                         run = true;
                     }
                 }
@@ -399,48 +403,6 @@ impl GraphItem {
     }
 }
 
-enum ToyNode {
-    GetVariable(String),
-    Indirection(Box<ToyNode>),
-    Concatenate(Vec<Box<ToyNode>>),
-    Constant(String),
-    Python(String),
-}
-
-
-fn parse_value<S: Into<String>>(val: S) -> ToyNode {
-    let input = val.into();
-
-    let mut result = Vec::new();
-    let mut last_end = 0;
-
-    // Iterate over all matches
-    for mat in VAR_EXPANSION_REGEX.find_iter(&input) {
-        let (start, end) = (mat.start(), mat.end());
-
-        // Check if there's a non-matching portion before the current match
-        if start > last_end {
-            // Add the non-matching portion to the result
-            result.push((input[last_end..start].to_string(), false));
-        }
-
-        // Add the current match to the result
-        result.push((mat.as_str().to_string(), true));
-
-        last_end = end;
-    }
-
-    // Check if there's any remaining non-matching portion at the end
-    if last_end < input.len() {
-        result.push((input[last_end..].to_string(), false));
-    }
-
-    dbg!(result);
-
-    panic!();
-    //return ToyNode::Concatenate(result);
-}
-
 fn main() {
     let mut d = DataSmart::new();
 
@@ -450,7 +412,7 @@ fn main() {
     // TARGET_OS = "linux${LIBCEXTENSION}${ABIEXTENSION}"
     // OVERRIDES = "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable"
 
-    d.set_var("ABIEXTENSION", "");
+    /*d.set_var("ABIEXTENSION", "");
     d.set_var("ABIEXTENSION:class-nativesdk", "wat");
     d.set_var("CLASSOVERRIDE", "class-nativesdk");
     d.set_var("TARGET_OS", "linux${LIBCEXTENSION}${ABIEXTENSION}");
@@ -462,13 +424,19 @@ fn main() {
     d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
 
     d.set_var("A:append:${B}", "C");
-    d.set_var("A:${B}", "D");
+    d.set_var("A:${B}", "D");*/
+
+    d.set_var("TARGET_ARCH", "x86_64");
+    d.set_var("PN", "test-${TARGET_ARCH}");
+    d.set_var("VERSION", "1");
+    d.set_var("VERSION:pn-test-${TARGET_ARCH}", "2");
+    d.set_var("OVERRIDES", "pn-${PN}");
 
     //parse_value("${${M}}");
 
     println!("\n");
     //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("ABIEXTENSION = {:?}\n", d.get_var("ABIEXTENSION", 0));
+    println!("VERSION = {:?}\n", d.get_var("VERSION", 0));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
