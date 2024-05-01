@@ -127,9 +127,7 @@ impl ExpansionState {
     }
 }
 
-struct OverrideState {
-
-}
+struct OverrideState {}
 
 #[derive(Debug)]
 struct DataSmart {
@@ -146,7 +144,7 @@ impl DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
             expand_state: RefCell::new(None),
-            active_overrides: RefCell::new(Some(IndexSet::new())),
+            active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
         }
     }
@@ -190,7 +188,7 @@ impl DataSmart {
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
 
-    fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
+    fn expand<S: AsRef<str>>(&self, value: S, level: usize) -> DataSmartResult<String> {
         let value = value.as_ref();
 
         // |expand_state| is used to track which variables are accessed during an expansion, across
@@ -216,12 +214,12 @@ impl DataSmart {
 
         let mut value = value.to_string();
         while value.contains("${") {
-            println!("EXPAND: {}", value);
+            println!("{}EXPAND: {}", " ".repeat(level), value);
             let new_value = replace_all(&*VAR_EXPANSION_REGEX, value.as_str(), |caps: &Captures| -> DataSmartResult<String> {
                 let match_str = caps.get(0).unwrap().as_str();
                 let referenced_var = &match_str[2..match_str.len() - 1];
 
-                println!("\texpand: {}", referenced_var);
+                println!("{} expand: {}", " ".repeat(level), referenced_var);
                 {
                     let mut s = RefCell::borrow_mut(&self.expand_state);
                     let set = s.as_mut().unwrap();
@@ -241,7 +239,7 @@ impl DataSmart {
                         set.visited.remove(referenced_var);
                     }
 
-                Ok(self.get_var(referenced_var).unwrap_or(match_str.to_string()))
+                Ok(self.get_var(referenced_var, level + 1).unwrap_or(match_str.to_string()))
             })?;
 
             if value == new_value {
@@ -253,15 +251,22 @@ impl DataSmart {
         Ok(value)
     }
 
-    fn compute_overrides(&self) -> DataSmartResult<()> {
+    fn compute_overrides(&self, level: usize) -> DataSmartResult<()> {
         if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
-            for _i in 0..5 {
-                eprintln!("++++ override iteration {}", _i);
-                let s = split_filter_empty(&self.get_var("OVERRIDES").unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+            if RefCell::borrow(&self.active_overrides)
+                .is_some()
+            {
+                return Ok(());
+            }
 
+            for i in 0..5 {
+                eprintln!("{}+ override iteration {}", " ".repeat(level), i);
+                let s = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+
+                eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(&self.get_var("OVERRIDES").unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                let s2 = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -274,11 +279,11 @@ impl DataSmart {
         Ok(())
     }
 
-    pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
+    pub fn get_var<S: AsRef<str>>(&self, var: S, level: usize) -> Option<String> {
         let var = var.as_ref();
 
         let var_entry = self.vars.get(var)?;
-        println!("get_var = {}", var);
+        println!("{}get_var = {}", " ".repeat(level), var);
 
         let mut ret: Option<String> = None;
 
@@ -292,7 +297,7 @@ impl DataSmart {
             }
         }
 
-        self.compute_overrides().unwrap();
+        self.compute_overrides(level + 1).unwrap();
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
@@ -324,6 +329,7 @@ impl DataSmart {
                 }
                 StmtKind::Assign => {
                     if run {
+                        eprintln!("= {}", q.rhs);
                         ret = q.rhs.clone().into();
                     }
                 }
@@ -331,7 +337,7 @@ impl DataSmart {
             }
         }
 
-        ret = ret.map(|s| self.expand(s).unwrap());
+        ret = ret.map(|s| self.expand(s, level + 1).unwrap());
         //*cached = ret.clone();
 
         ret
@@ -447,6 +453,7 @@ fn main() {
     d.set_var("ABIEXTENSION:class-nativesdk", "wat");
     d.set_var("CLASSOVERRIDE", "class-nativesdk");
     d.set_var("TARGET_OS", "linux${LIBCEXTENSION}${ABIEXTENSION}");
+    d.set_var("LIBCEXTENSION", "");
     d.set_var("LIBCOVERRIDE", "");
     //d.set_var("TRANSLATED_TARGET_ARCH", "wat");
     //d.set_var("PN", "waves");
@@ -460,7 +467,7 @@ fn main() {
 
     println!("\n");
     //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("TARGET_OS = {:?}\n", d.get_var("TARGET_OS"));
+    println!("ABIEXTENSION = {:?}\n", d.get_var("ABIEXTENSION", 0));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
