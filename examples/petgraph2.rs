@@ -1,10 +1,7 @@
-use std::borrow::Cow;
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
-use std::ops::Deref;
 
-use anyhow::Context;
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -15,6 +12,7 @@ use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
+
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
 use bytebraise::data_smart::utils::{replace_all, split_filter_empty};
 
@@ -82,7 +80,7 @@ impl StmtKind {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 struct VariableOperation {
     op_type: StmtKind,
     idx: NodeIndex<DefaultIx>,
@@ -304,42 +302,72 @@ impl DataSmart {
 
         //let overrides = self.get_var("OVERRIDES");
 
-        for op in var_data.operations.heap.iter() {
-            eprintln!("||||| {:?}", op);
-            let index = op.0.idx;
-            let q = self.ds.node_weight(index).unwrap().statement();
+        for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
+            if op_group.0 == StmtKind::Assign {
+                let scored_ops = op_group.1.sorted_by_cached_key(|op2| {
+                    // TODO: need to support more than 64 overrides?
+                    let mut score: u64 = 0;
 
-            let mut run = false;
-            if q.lhs.is_empty() {
-                run = true;
+                    let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
+                    // TODO: cache LHS?
+                    let expanded_override_string = self.expand(&assign_stmt.lhs, level + 1).unwrap();
+                    let operation_overrides = split_filter_empty(&expanded_override_string, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                    if let Some(overrides) = override_state {
+                        for (i, active_override) in overrides.iter().enumerate() {
+                            if operation_overrides.contains(active_override) {
+                                score |= 1 << i;
+                            }
+                        }
+                    }
+
+                    return score;
+                }).collect::<Vec<_>>();
+
+                let winning_op = scored_ops.last().unwrap();
+                let q = self.ds.node_weight(winning_op.0.idx).unwrap().statement();
+                ret = q.rhs.clone().into();
+
+                eprintln!("{:?}", scored_ops);
             } else {
-                let expanded_lhs = self.expand(&q.lhs, level + 1).unwrap();
-                eprintln!("{:?}", expanded_lhs);
-                let operation_overrides = split_filter_empty(&expanded_lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
-                if let Some(overrides) = override_state {
-                    if operation_overrides.is_subset(overrides) {
-                        // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
+                for op in op_group.1 {
+
+                    let index = op.0.idx;
+                    let q = self.ds.node_weight(index).unwrap().statement();
+
+                    let mut run = false;
+                    if q.lhs.is_empty() {
                         run = true;
+                    } else {
+                        let expanded_lhs = self.expand(&q.lhs, level + 1).unwrap();
+                        eprintln!("{:?}", expanded_lhs);
+                        let operation_overrides = split_filter_empty(&expanded_lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                        if let Some(overrides) = override_state {
+                            if operation_overrides.is_subset(overrides) {
+                                // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
+                                run = true;
+                            }
+                        }
+                    }
+
+                    match op_group.0 {
+                        StmtKind::Append => {
+                            if run {
+                                ret = ret.map(|s| {
+                                    s + " " + &*q.rhs.clone()
+                                });
+                            }
+                        }
+                        StmtKind::Assign => {
+                            if run {
+                                eprintln!("= {}, {}", q.rhs, op.1);
+                                ret = q.rhs.clone().into();
+                            }
+                        }
+                        _ => unimplemented!()
                     }
                 }
             }
 
-            match op.0.op_type {
-                StmtKind::Append => {
-                    if run {
-                        ret = ret.map(|s| {
-                            s + " " + &*q.rhs.clone()
-                        });
-                    }
-                }
-                StmtKind::Assign => {
-                    if run {
-                        eprintln!("= {}, {}", q.rhs, op.1);
-                        ret = q.rhs.clone().into();
-                    }
-                }
-                _ => unimplemented!()
-            }
         }
 
         ret = ret.map(|s| self.expand(s, level + 1).unwrap());
@@ -426,17 +454,17 @@ fn main() {
     d.set_var("A:append:${B}", "C");
     d.set_var("A:${B}", "D");*/
 
-    d.set_var("TARGET_ARCH", "x86_64");
-    d.set_var("PN", "test-${TARGET_ARCH}");
-    d.set_var("VERSION", "1");
-    d.set_var("VERSION:pn-test-${TARGET_ARCH}", "2");
-    d.set_var("OVERRIDES", "pn-${PN}");
+    d.set_var("TEST:bar", "testvalue2");
+    d.set_var("TEST:foo", "testvalue4");
+    d.set_var("TEST:some_val", "testvalue3 testvalue5");
+    //d.set_var("TEST:some_val:remove", "testvalue3");
+    d.set_var("OVERRIDES", "foo:bar:some_val");
 
     //parse_value("${${M}}");
 
     println!("\n");
     //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("VERSION = {:?}\n", d.get_var("VERSION", 0));
+    println!("TEST = {:?}\n", d.get_var("TEST", 0));
 
     println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
