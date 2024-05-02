@@ -10,7 +10,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
-use regex::{Captures, Regex};
+use regex::{CaptureLocations, Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
@@ -22,7 +22,7 @@ static VAR_EXPANSION_REGEX: Lazy<Regex> =
 static PYTHON_EXPANSION_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{@.+?}").unwrap());
 
 static KEYWORD_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?P<keyword>:append|:prepend|:remove)(?:$|:)").unwrap());
+    Lazy::new(|| Regex::new(r"(?P<all>(?P<keyword>:append|:prepend|:remove)(?:$|:))").unwrap());
 
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 
@@ -84,6 +84,11 @@ impl StmtKind {
     }
 }
 
+#[derive(Debug)]
+enum OverrideOperation {
+    Remove, Prepend, Append
+}
+
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 struct VariableOperation {
     op_type: StmtKind,
@@ -139,6 +144,27 @@ struct DataSmart {
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
+}
+
+// TODO: need to support more than 64 overrides?
+fn score_override(active_overrides: &Option<IndexSet<String>>, candidate_overrides: &IndexSet<String>) -> u64 {
+    let mut ret = 0;
+
+    if let Some(active_overrides) = active_overrides {
+        for (i, active_override) in active_overrides.iter().enumerate() {
+            if candidate_overrides.contains(active_override) {
+                ret |= 1 << i;
+            }
+        }
+    }
+
+    ret
+}
+
+fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
+    split_filter_empty(input.as_ref(), ":")
+        .map(|s| String::from(s))
+        .collect::<IndexSet<String>>()
 }
 
 impl DataSmart {
@@ -293,6 +319,7 @@ impl DataSmart {
     pub fn get_var<S: AsRef<str>>(&self, var: S, level: usize) -> Option<String> {
         let var = var.as_ref();
 
+        // TODO: handle override syntax, e.g. getVar("A:pn-waves")
         let var_entry = self.vars.get(var)?;
         println!("{}get_var = {}", " ".repeat(level), var);
 
@@ -308,11 +335,75 @@ impl DataSmart {
             }
         }
 
+        // TODO: only do this if needed
         self.compute_overrides(level + 1).unwrap();
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
-        //let overrides = self.get_var("OVERRIDES");
+        #[derive(Debug)]
+        enum OverridesData {
+            Operation {
+                lhs: IndexSet<String>,
+                kind: OverrideOperation,
+                rhs: IndexSet<String>,
+            },
+            PureOverride(IndexSet<String>),
+        }
+
+        #[derive(Debug)]
+        struct PreprocessedOperationData {
+            override_data: Option<OverridesData>,
+            rhs: String,
+        }
+
+        let mut preprocessed: Vec<(StmtKind, Vec<PreprocessedOperationData>)> = vec![];
+
+        // Pre-process operations in the priority heap
+        for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
+            let mut preprocessed_ops = vec![];
+
+            for op in op_group.1 {
+                let mut overrides_data: Option<OverridesData> = None;
+                let assign_stmt = self.ds.node_weight(op.0.idx).unwrap().statement();
+                let expanded_lhs = assign_stmt.lhs.as_ref().map(|s| self.expand(s, level + 1)).transpose().unwrap();
+
+                if let Some(expanded_lhs) = expanded_lhs {
+                    let mut locs = KEYWORD_REGEX.capture_locations();
+
+                    if let Some(keyword_match) = KEYWORD_REGEX.captures_read(&mut locs, &expanded_lhs) {
+                        let c = locs.get(1).unwrap();
+
+                        let operation_kind = match &expanded_lhs[c.0..c.1] {
+                            ":append" => OverrideOperation::Append,
+                            ":prepend" => OverrideOperation::Prepend,
+                            ":remove" => OverrideOperation::Remove,
+                            _ => unreachable!(),
+                        };
+
+                        let override_lhs = &expanded_lhs[0..c.0];
+                        let override_rhs = &expanded_lhs[c.1..];
+
+                        overrides_data = Some(OverridesData::Operation {
+                            kind: operation_kind,
+                            lhs: split_overrides(override_lhs),
+                            rhs: split_overrides(override_rhs)
+                        });
+                    } else {
+                        overrides_data = Some(OverridesData::PureOverride(split_overrides(expanded_lhs)));
+                    }
+                }
+
+                preprocessed_ops.push(PreprocessedOperationData {
+                    override_data: overrides_data,
+                    rhs: assign_stmt.rhs.clone(),
+                })
+                // TODO: place expanded LHS in the assignment cache?
+            }
+
+            preprocessed.push((op_group.0, preprocessed_ops));
+        }
+
+        eprintln!("{:#?}", preprocessed);
 
         // Iterate over operations in the priority heap, aggregated by operation type
         for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
@@ -324,23 +415,12 @@ impl DataSmart {
 
                         // TODO: cache LHS?
                         assign_stmt.lhs.as_ref().map_or(0, |s| {
-                            // TODO: need to support more than 64 overrides?
-                            let mut score: u64 = 0;
-
                             let expanded_override_string = self.expand(&s, level + 1).unwrap();
                             let operation_overrides =
                                 split_filter_empty(&expanded_override_string, ":")
                                     .map(|s| String::from(s))
                                     .collect::<IndexSet<String>>();
-                            if let Some(overrides) = override_state {
-                                for (i, active_override) in overrides.iter().enumerate() {
-                                    if operation_overrides.contains(active_override) {
-                                        score |= 1 << i;
-                                    }
-                                }
-                            }
-
-                            return score;
+                            score_override(override_state, &operation_overrides)
                         })
                     })
                     .collect::<Vec<_>>();
