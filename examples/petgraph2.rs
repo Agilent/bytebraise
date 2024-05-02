@@ -21,12 +21,10 @@ static VAR_EXPANSION_REGEX: Lazy<Regex> =
 
 static PYTHON_EXPANSION_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{@.+?}").unwrap());
 
-static SETVAR_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)?(?P<add>:.*)?$")
-        .unwrap()
-});
-static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
+static KEYWORD_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?P<keyword>:append|:prepend|:remove)(?:$|:)").unwrap());
 
+static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {
@@ -74,8 +72,11 @@ impl StmtKind {
         match self {
             StmtKind::WeakDefault => 1,
             StmtKind::Default => 2,
-            StmtKind::Assign | StmtKind::PlusEqual | StmtKind::EqualPlus
-            | StmtKind::DotEqual | StmtKind::EqualDot => 3,
+            StmtKind::Assign
+            | StmtKind::PlusEqual
+            | StmtKind::EqualPlus
+            | StmtKind::DotEqual
+            | StmtKind::EqualDot => 3,
             StmtKind::Append => 4,
             StmtKind::Prepend => 5,
             StmtKind::Remove => 6,
@@ -155,12 +156,13 @@ impl DataSmart {
         let var = var.into();
         let value = value.into();
 
-        let regex_match = SETVAR_REGEX.captures(&var).unwrap();
-        let base = regex_match.name("base").unwrap().as_str();
+        let var_parts = var.split_once(':');
+        let base = var_parts.map_or(var.as_str(), |parts| parts.0);
+        let override_str = var_parts.map(|parts| parts.1);
 
-        //println!("{:?}", regex_match);
+        let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-        let stmt_kind = match regex_match.name("keyword").map(|m| m.as_str()) {
+        let stmt_kind = match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
             None => StmtKind::Assign,
             Some(":append") => StmtKind::Append,
             Some(":prepend") => StmtKind::Prepend,
@@ -168,17 +170,16 @@ impl DataSmart {
             Some(_) => unreachable!(),
         };
 
-        let var_without_keyword = regex_match.name("add").map(|m| m.as_str().to_string()).unwrap_or_default();
-
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
-            lhs: var_without_keyword,
+            lhs: override_str.map(String::from),
             kind: stmt_kind,
             rhs: value,
         }));
 
-        let var_entry = self.vars.entry(base.to_string()).or_insert_with(|| {
-            self.ds.add_node(GraphItem::new_variable(base))
-        });
+        let var_entry = self
+            .vars
+            .entry(base.to_string())
+            .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(base)));
 
         let var_data = self.ds.node_weight_mut(*var_entry).unwrap().variable_mut();
 
@@ -217,32 +218,38 @@ impl DataSmart {
         let mut value = value.to_string();
         while value.contains("${") {
             println!("{}EXPAND: {}", " ".repeat(level), value);
-            let new_value = replace_all(&*VAR_EXPANSION_REGEX, value.as_str(), |caps: &Captures| -> DataSmartResult<String> {
-                let match_str = caps.get(0).unwrap().as_str();
-                let referenced_var = &match_str[2..match_str.len() - 1];
+            let new_value = replace_all(
+                &*VAR_EXPANSION_REGEX,
+                value.as_str(),
+                |caps: &Captures| -> DataSmartResult<String> {
+                    let match_str = caps.get(0).unwrap().as_str();
+                    let referenced_var = &match_str[2..match_str.len() - 1];
 
-                println!("{} expand: {}", " ".repeat(level), referenced_var);
-                {
-                    let mut s = RefCell::borrow_mut(&self.expand_state);
-                    let set = s.as_mut().unwrap();
-                    if set.visited.contains(referenced_var) {
-                        return Err(DataSmartError::RecursiveReferenceError {
-                            var: referenced_var.to_string(),
-                        }
+                    println!("{} expand: {}", " ".repeat(level), referenced_var);
+                    {
+                        let mut s = RefCell::borrow_mut(&self.expand_state);
+                        let set = s.as_mut().unwrap();
+                        if set.visited.contains(referenced_var) {
+                            return Err(DataSmartError::RecursiveReferenceError {
+                                var: referenced_var.to_string(),
+                            }
                             .into());
-                    } else {
-                        set.visited.insert(referenced_var.to_string());
+                        } else {
+                            set.visited.insert(referenced_var.to_string());
+                        }
                     }
-                }
 
-                defer! {
+                    defer! {
                         let mut s = RefCell::borrow_mut(&self.expand_state);
                         let set = s.as_mut().unwrap();
                         set.visited.remove(referenced_var);
                     }
 
-                Ok(self.get_var(referenced_var, level + 1).unwrap_or(match_str.to_string()))
-            })?;
+                    Ok(self
+                        .get_var(referenced_var, level + 1)
+                        .unwrap_or(match_str.to_string()))
+                },
+            )?;
 
             if value == new_value {
                 break;
@@ -255,20 +262,22 @@ impl DataSmart {
 
     fn compute_overrides(&self, level: usize) -> DataSmartResult<()> {
         if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
-            if RefCell::borrow(&self.active_overrides)
-                .is_some()
-            {
+            if RefCell::borrow(&self.active_overrides).is_some() {
                 return Ok(());
             }
 
             for i in 0..5 {
                 eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                let s = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":")
+                    .map(|s| String::from(s))
+                    .collect::<IndexSet<String>>();
 
                 eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
+                let s2 = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":")
+                    .map(|s| String::from(s))
+                    .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -305,26 +314,36 @@ impl DataSmart {
 
         //let overrides = self.get_var("OVERRIDES");
 
+        // Iterate over operations in the priority heap, aggregated by operation type
         for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
             if op_group.0 == StmtKind::Assign {
-                let scored_ops = op_group.1.sorted_by_cached_key(|op2| {
-                    // TODO: need to support more than 64 overrides?
-                    let mut score: u64 = 0;
+                let scored_ops = op_group
+                    .1
+                    .sorted_by_cached_key(|op2| {
+                        let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
 
-                    let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
-                    // TODO: cache LHS?
-                    let expanded_override_string = self.expand(&assign_stmt.lhs, level + 1).unwrap();
-                    let operation_overrides = split_filter_empty(&expanded_override_string, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
-                    if let Some(overrides) = override_state {
-                        for (i, active_override) in overrides.iter().enumerate() {
-                            if operation_overrides.contains(active_override) {
-                                score |= 1 << i;
+                        // TODO: cache LHS?
+                        assign_stmt.lhs.as_ref().map_or(0, |s| {
+                            // TODO: need to support more than 64 overrides?
+                            let mut score: u64 = 0;
+
+                            let expanded_override_string = self.expand(&s, level + 1).unwrap();
+                            let operation_overrides =
+                                split_filter_empty(&expanded_override_string, ":")
+                                    .map(|s| String::from(s))
+                                    .collect::<IndexSet<String>>();
+                            if let Some(overrides) = override_state {
+                                for (i, active_override) in overrides.iter().enumerate() {
+                                    if operation_overrides.contains(active_override) {
+                                        score |= 1 << i;
+                                    }
+                                }
                             }
-                        }
-                    }
 
-                    return score;
-                }).collect::<Vec<_>>();
+                            return score;
+                        })
+                    })
+                    .collect::<Vec<_>>();
 
                 let winning_op = scored_ops.last().unwrap();
                 let q = self.ds.node_weight(winning_op.0.idx).unwrap().statement();
@@ -333,21 +352,23 @@ impl DataSmart {
                 eprintln!("{:?}", scored_ops);
             } else {
                 for op in op_group.1 {
-
                     let index = op.0.idx;
                     let q = self.ds.node_weight(index).unwrap().statement();
 
                     let mut run = false;
-                    if q.lhs.is_empty() {
-                        run = true;
-                    } else {
-                        let expanded_lhs = self.expand(&q.lhs, level + 1).unwrap();
-                        eprintln!("{:?}", expanded_lhs);
-                        let operation_overrides = split_filter_empty(&expanded_lhs, ":").map(|s| String::from(s)).collect::<IndexSet<String>>();
-                        if let Some(overrides) = override_state {
-                            if operation_overrides.is_subset(overrides) {
-                                // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
-                                run = true;
+                    match &q.lhs {
+                        None => run = true,
+                        Some(override_str) => {
+                            let expanded_lhs = self.expand(&override_str, level + 1).unwrap();
+                            eprintln!("{:?}", expanded_lhs);
+                            let operation_overrides = split_filter_empty(&expanded_lhs, ":")
+                                .map(|s| String::from(s))
+                                .collect::<IndexSet<String>>();
+                            if let Some(overrides) = override_state {
+                                if operation_overrides.is_subset(overrides) {
+                                    // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
+                                    run = true;
+                                }
                             }
                         }
                     }
@@ -355,9 +376,7 @@ impl DataSmart {
                     match op_group.0 {
                         StmtKind::Append => {
                             if run {
-                                ret = ret.map(|s| {
-                                    s + " " + &*q.rhs.clone()
-                                });
+                                ret = ret.map(|s| s + " " + &*q.rhs.clone());
                             }
                         }
                         StmtKind::Assign => {
@@ -366,11 +385,10 @@ impl DataSmart {
                                 ret = q.rhs.clone().into();
                             }
                         }
-                        _ => unimplemented!()
+                        _ => unimplemented!(),
                     }
                 }
             }
-
         }
 
         ret = ret.map(|s| self.expand(s, level + 1).unwrap());
@@ -388,11 +406,9 @@ struct Variable {
     // TODO: iterative cache for OVERRIDES
 }
 
+#[derive(Debug)]
 enum OverrideSpec {
-    Split {
-        lhs: String,
-        rhs: String,
-    },
+    Split { lhs: String, rhs: String },
     Single(String),
 }
 
@@ -401,7 +417,7 @@ struct StmtNode {
     kind: StmtKind,
 
     /// The override(s) to the left of
-    lhs: String,
+    lhs: Option<String>,
 
     /// The value
     rhs: String,

@@ -1,8 +1,8 @@
+use bytebraise::data_smart::overrides::decompose_variable;
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use petgraph::stable_graph::{DefaultIx, NodeIndex};
 use regex::Regex;
-use bytebraise::data_smart::overrides::decompose_variable;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -95,7 +95,11 @@ impl DataSmart {
         if let Some(index) = self.expressions.get(&value) {
             *index
         } else {
-            let index = self.ds.add_node(GraphItem::FlagOrOverloadValue(FlagOrOverloadValue::new(value.clone())));
+            let index = self
+                .ds
+                .add_node(GraphItem::FlagOrOverloadValue(FlagOrOverloadValue::new(
+                    value.clone(),
+                )));
             self.expressions.insert(value, index);
             index
         }
@@ -121,7 +125,9 @@ impl DataSmart {
             let value = self._intern_expression(value.clone());
             let base_variable_data = self.ds.node_weight_mut(base_variable_index).unwrap();
 
-            let GraphItem::Variable(var) = base_variable_data else { panic!(); };
+            let GraphItem::Variable(var) = base_variable_data else {
+                panic!();
+            };
             match keyword {
                 "_append" => {
                     var.appends.push(Apr { override_, value });
@@ -130,13 +136,15 @@ impl DataSmart {
                     var.prepends.push(Apr { override_, value });
                 }
                 "_remove" => {
-                    var.removes.push( Apr { override_, value });
+                    var.removes.push(Apr { override_, value });
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         } else {
             let index = self._create_variable_hierarchy(&*var_name);
-            let Some(GraphItem::Variable(var_node)) = self.ds.node_weight_mut(index) else { panic!() };
+            let Some(GraphItem::Variable(var_node)) = self.ds.node_weight_mut(index) else {
+                panic!()
+            };
             var_node.value = value.clone();
 
             //let node = self.ds.add_node(GraphItem::Variable(Variable::new(value.clone())));
@@ -171,12 +179,15 @@ impl DataSmart {
         ret
     }
 
-    fn set_var_flag(&mut self, var_name: impl Into<String> + Clone, flag: impl Into<String>, value: impl Into<String>) {
+    fn set_var_flag(
+        &mut self,
+        var_name: impl Into<String> + Clone,
+        flag: impl Into<String>,
+        value: impl Into<String>,
+    ) {
         let var_name = var_name.into();
         let value = value.into();
         let flag = flag.into();
-
-
     }
 
     fn add_variable_edges(&mut self, node: NodeIndex<DefaultIx>, value: impl Into<String>) {
@@ -190,7 +201,8 @@ impl DataSmart {
                 self.ds.add_edge(*referenced_node, node, 0);
             } else {
                 let referenced_node = self.ds.add_node(GraphItem::Variable(Variable::new("")));
-                self.vars.insert(referenced_var.to_string(), referenced_node);
+                self.vars
+                    .insert(referenced_var.to_string(), referenced_node);
                 self.ds.add_edge(referenced_node, node, 0);
             }
         }

@@ -2,6 +2,7 @@
 #![feature(min_specialization)]
 #![feature(assert_matches)]
 
+pub mod ast;
 pub mod build;
 pub mod cooker_data;
 pub mod data_smart;
@@ -12,6 +13,5 @@ pub mod python;
 pub mod split_var_value;
 pub mod syntax;
 pub mod utils;
-pub mod ast;
 
 pub type ByteBraiseResult<T> = anyhow::Result<T>;

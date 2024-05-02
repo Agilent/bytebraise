@@ -1,5 +1,5 @@
-use std::fmt::{Debug, Error, Formatter};
 use itertools::Itertools;
+use std::fmt::{Debug, Error, Formatter};
 
 pub enum Expression {
     Concatenate(Vec<Box<Expression>>),
@@ -14,7 +14,11 @@ impl Debug for Expression {
         use self::Expression::*;
         match *self {
             Concatenate(ref exprs) => {
-                write!(fmt, "Concatenate({})", exprs.into_iter().map( |v| format!("{:?}", v)).join(", "))
+                write!(
+                    fmt,
+                    "Concatenate({})",
+                    exprs.into_iter().map(|v| format!("{:?}", v)).join(", ")
+                )
             }
             Expansion(ref var) => write!(fmt, "GetVar({})", var),
             Indirection(ref expr) => write!(fmt, "Indirection({:?})", expr),
