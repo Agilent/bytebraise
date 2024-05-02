@@ -36,8 +36,11 @@ pub struct FifoHeap<T> {
 
 // TODO: An 'assign' may actually act as an 'append' (or others) e.g.
 //  P = ""
-//  P:test = "append"
-//  A:${P:test} = "OK2"
+//  P:a = "append"
+//  Q = "base "
+//  Q:${P} = "OK2"         <-- this is executed second
+//  Q:append = "me first"  <-- this is executed first
+//  OVERRIDES = "a"
 //    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
 //    our binary heap approach still works :)
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -385,10 +388,22 @@ struct Variable {
     // TODO: iterative cache for OVERRIDES
 }
 
+enum OverrideSpec {
+    Split {
+        lhs: String,
+        rhs: String,
+    },
+    Single(String),
+}
+
 #[derive(Debug)]
 struct StmtNode {
     kind: StmtKind,
+
+    /// The override(s) to the left of
     lhs: String,
+
+    /// The value
     rhs: String,
 }
 
@@ -457,7 +472,7 @@ fn main() {
     d.set_var("TEST:bar", "testvalue2");
     d.set_var("TEST:foo", "testvalue4");
     d.set_var("TEST:some_val", "testvalue3 testvalue5");
-    //d.set_var("TEST:some_val:remove", "testvalue3");
+    d.set_var("TEST:some_val:remove", "testvalue3");
     d.set_var("OVERRIDES", "foo:bar:some_val");
 
     //parse_value("${${M}}");
