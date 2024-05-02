@@ -1,9 +1,8 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use fxhash::FxHashMap;
-use im_rc::HashMap;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
