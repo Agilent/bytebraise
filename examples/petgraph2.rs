@@ -3,7 +3,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
 
 use fxhash::FxHashMap;
-use indexmap::IndexSet;
+use im_rc::HashMap;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::dot::Dot;
@@ -14,7 +15,7 @@ use regex::{CaptureLocations, Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
-use bytebraise::data_smart::utils::{replace_all, split_filter_empty};
+use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -41,10 +42,9 @@ pub struct FifoHeap<T> {
 //  OVERRIDES = "a"
 //    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
 //    our binary heap approach still works :)
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 enum StmtKind {
     WeakDefault,
-    Default,
     Assign,
     PlusEqual,
     EqualPlus,
@@ -68,18 +68,23 @@ impl PartialOrd for StmtKind {
 }
 
 impl StmtKind {
+
+    // Default (?=) is handled at parse time
     fn order_value(&self) -> u8 {
         match self {
-            StmtKind::WeakDefault => 1,
-            StmtKind::Default => 2,
             StmtKind::Assign
             | StmtKind::PlusEqual
             | StmtKind::EqualPlus
             | StmtKind::DotEqual
-            | StmtKind::EqualDot => 3,
-            StmtKind::Append => 4,
-            StmtKind::Prepend => 5,
-            StmtKind::Remove => 6,
+            | StmtKind::EqualDot => 1,
+            // ??=
+            StmtKind::WeakDefault => 2,
+            // :remove
+            StmtKind::Append => 3,
+            // :prepend
+            StmtKind::Prepend => 4,
+            // :remove
+            StmtKind::Remove => 5,
         }
     }
 }
@@ -146,6 +151,7 @@ struct DataSmart {
     inside_compute_overrides: RefCell<()>,
 }
 
+// TODO: reject candidate if overrides present that are not active!!!
 // TODO: need to support more than 64 overrides?
 fn score_override(active_overrides: &Option<IndexSet<String>>, candidate_overrides: &IndexSet<String>) -> u64 {
     let mut ret = 0;
@@ -346,8 +352,21 @@ impl DataSmart {
                 lhs: IndexSet<String>,
                 kind: OverrideOperation,
                 rhs: IndexSet<String>,
+                score: u64,
             },
-            PureOverride(IndexSet<String>),
+            PureOverride  {
+                overrides: IndexSet<String>,
+                score: u64,
+            },
+        }
+
+        impl OverridesData {
+            fn score(&self) -> u64 {
+                match self {
+                    OverridesData::Operation { score, .. } => *score,
+                    OverridesData::PureOverride { score, .. } => *score,
+                }
+            }
         }
 
         #[derive(Debug)]
@@ -356,7 +375,7 @@ impl DataSmart {
             rhs: String,
         }
 
-        let mut preprocessed: Vec<(StmtKind, Vec<PreprocessedOperationData>)> = vec![];
+        let mut preprocessed: IndexMap<StmtKind, Vec<PreprocessedOperationData>> = IndexMap::new();
 
         // Pre-process operations in the priority heap
         for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
@@ -381,15 +400,23 @@ impl DataSmart {
                         };
 
                         let override_lhs = &expanded_lhs[0..c.0];
-                        let override_rhs = &expanded_lhs[c.1..];
+                        let override_rhs = split_overrides(&expanded_lhs[c.1..]);
+                        let override_score = score_override(override_state, &override_rhs);
 
                         overrides_data = Some(OverridesData::Operation {
                             kind: operation_kind,
                             lhs: split_overrides(override_lhs),
-                            rhs: split_overrides(override_rhs)
+                            rhs: override_rhs,
+                            score: override_score,
                         });
                     } else {
-                        overrides_data = Some(OverridesData::PureOverride(split_overrides(expanded_lhs)));
+                        let overrides = split_overrides(expanded_lhs);
+                        let override_score = score_override(override_state, &overrides);
+
+                        overrides_data = Some(OverridesData::PureOverride {
+                            overrides,
+                            score: override_score,
+                        });
                     }
                 }
 
@@ -400,76 +427,128 @@ impl DataSmart {
                 // TODO: place expanded LHS in the assignment cache?
             }
 
-            preprocessed.push((op_group.0, preprocessed_ops));
+            preprocessed.insert(op_group.0, preprocessed_ops);
         }
 
         eprintln!("{:#?}", preprocessed);
 
-        // Iterate over operations in the priority heap, aggregated by operation type
-        for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
-            if op_group.0 == StmtKind::Assign {
-                let scored_ops = op_group
-                    .1
-                    .sorted_by_cached_key(|op2| {
-                        let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
+        for op_group in &preprocessed {
+            match *op_group.0 {
+                StmtKind::Assign => {
+                    let winning_assignment = op_group.1.iter().sorted_by_cached_key(|o| {
+                        o.override_data.as_ref().map_or(0, |d| d.score())
+                    }).last().unwrap();
 
-                        // TODO: cache LHS?
-                        assign_stmt.lhs.as_ref().map_or(0, |s| {
-                            let expanded_override_string = self.expand(&s, level + 1).unwrap();
-                            let operation_overrides =
-                                split_filter_empty(&expanded_override_string, ":")
-                                    .map(|s| String::from(s))
-                                    .collect::<IndexSet<String>>();
-                            score_override(override_state, &operation_overrides)
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                    // TODO: handle overrides in rhs of override data
+                    ret = winning_assignment.rhs.clone().into();
+                },
+                StmtKind::Remove => {
+                    let mut removes: HashSet<String> = HashSet::new();
+                    for remove in op_group.1 {
+                        // TODO: check if override active
+                        removes.insert(remove.rhs.clone());
+                    }
 
-                let winning_op = scored_ops.last().unwrap();
-                let q = self.ds.node_weight(winning_op.0.idx).unwrap().statement();
-                ret = q.rhs.clone().into();
+                    // TODO only only content flag and if not parsing
+                    let mut expanded_removes = HashMap::new();
+                    for r in &removes {
+                        expanded_removes.insert(
+                            r.clone(),
+                            self.expand(r, level + 1)
+                                .unwrap()
+                                .split_whitespace()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>(),
+                        );
+                    }
 
-                eprintln!("{:?}", scored_ops);
-            } else {
-                for op in op_group.1 {
-                    let index = op.0.idx;
-                    let q = self.ds.node_weight(index).unwrap().statement();
-
-                    let mut run = false;
-                    match &q.lhs {
-                        None => run = true,
-                        Some(override_str) => {
-                            let expanded_lhs = self.expand(&override_str, level + 1).unwrap();
-                            eprintln!("{:?}", expanded_lhs);
-                            let operation_overrides = split_filter_empty(&expanded_lhs, ":")
-                                .map(|s| String::from(s))
-                                .collect::<IndexSet<String>>();
-                            if let Some(overrides) = override_state {
-                                if operation_overrides.is_subset(overrides) {
-                                    // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
-                                    run = true;
+                    if let Some(ret) = &mut ret {
+                        let mut val = String::new();
+                        for v in split_keep(&WHITESPACE_REGEX, ret) {
+                            let mut skip = false;
+                            for r in &removes {
+                                if expanded_removes.get(r).unwrap().contains(&v.to_string()) {
+                                    //parser.removes.as_mut().unwrap().insert(r.clone());
+                                    skip = true;
                                 }
                             }
-                        }
-                    }
-
-                    match op_group.0 {
-                        StmtKind::Append => {
-                            if run {
-                                ret = ret.map(|s| s + " " + &*q.rhs.clone());
+                            if skip {
+                                continue;
                             }
+                            val += v;
                         }
-                        StmtKind::Assign => {
-                            if run {
-                                eprintln!("= {}, {}", q.rhs, op.1);
-                                ret = q.rhs.clone().into();
-                            }
-                        }
-                        _ => unimplemented!(),
+                        *ret = val;
                     }
                 }
+                _ => panic!("unimplemented"),
             }
         }
+
+        // // Iterate over operations in the priority heap, aggregated by operation type
+        // for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
+        //     if op_group.0 == StmtKind::Assign {
+        //         let scored_ops = op_group
+        //             .1
+        //             .sorted_by_cached_key(|op2| {
+        //                 let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
+        //
+        //                 // TODO: cache LHS?
+        //                 assign_stmt.lhs.as_ref().map_or(0, |s| {
+        //                     let expanded_override_string = self.expand(&s, level + 1).unwrap();
+        //                     let operation_overrides =
+        //                         split_filter_empty(&expanded_override_string, ":")
+        //                             .map(|s| String::from(s))
+        //                             .collect::<IndexSet<String>>();
+        //                     score_override(override_state, &operation_overrides)
+        //                 })
+        //             })
+        //             .collect::<Vec<_>>();
+        //
+        //         let winning_op = scored_ops.last().unwrap();
+        //         let q = self.ds.node_weight(winning_op.0.idx).unwrap().statement();
+        //         ret = q.rhs.clone().into();
+        //
+        //         eprintln!("{:?}", scored_ops);
+        //     } else {
+        //         for op in op_group.1 {
+        //             let index = op.0.idx;
+        //             let q = self.ds.node_weight(index).unwrap().statement();
+        //
+        //             let mut run = false;
+        //             match &q.lhs {
+        //                 None => run = true,
+        //                 Some(override_str) => {
+        //                     let expanded_lhs = self.expand(&override_str, level + 1).unwrap();
+        //                     eprintln!("{:?}", expanded_lhs);
+        //                     let operation_overrides = split_filter_empty(&expanded_lhs, ":")
+        //                         .map(|s| String::from(s))
+        //                         .collect::<IndexSet<String>>();
+        //                     if let Some(overrides) = override_state {
+        //                         if operation_overrides.is_subset(overrides) {
+        //                             // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
+        //                             run = true;
+        //                         }
+        //                     }
+        //                 }
+        //             }
+        //
+        //             match op_group.0 {
+        //                 StmtKind::Append => {
+        //                     if run {
+        //                         ret = ret.map(|s| s + " " + &*q.rhs.clone());
+        //                     }
+        //                 }
+        //                 StmtKind::Assign => {
+        //                     if run {
+        //                         eprintln!("= {}, {}", q.rhs, op.1);
+        //                         ret = q.rhs.clone().into();
+        //                     }
+        //                 }
+        //                 _ => unimplemented!(),
+        //             }
+        //         }
+        //     }
+        // }
 
         ret = ret.map(|s| self.expand(s, level + 1).unwrap());
         //*cached = ret.clone();
