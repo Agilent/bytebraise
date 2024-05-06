@@ -150,10 +150,16 @@ struct DataSmart {
     inside_compute_overrides: RefCell<()>,
 }
 
-// TODO: reject candidate if overrides present that are not active!!!
 // TODO: need to support more than 64 overrides?
-fn score_override(active_overrides: &Option<IndexSet<String>>, candidate_overrides: &IndexSet<String>) -> u64 {
+fn score_override(active_overrides: &Option<IndexSet<String>>, candidate_overrides: &IndexSet<String>) -> Option<u64> {
     let mut ret = 0;
+
+    // Reject this override if it contains terms not in active override set
+    // TODO: change this to not clone
+    let temp_cloned_active_overrides = active_overrides.as_ref().map(|a| a.clone()).unwrap_or_default();
+    if !candidate_overrides.is_subset(&temp_cloned_active_overrides) {
+        return None;
+    }
 
     if let Some(active_overrides) = active_overrides {
         for (i, active_override) in active_overrides.iter().enumerate() {
@@ -163,7 +169,7 @@ fn score_override(active_overrides: &Option<IndexSet<String>>, candidate_overrid
         }
     }
 
-    ret
+    Some(ret)
 }
 
 fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
@@ -425,7 +431,7 @@ impl DataSmart {
 
                         let override_lhs = &expanded_lhs[0..c.0];
                         let override_rhs = split_overrides(&expanded_lhs[c.1..]);
-                        let override_score = score_override(override_state, &override_rhs);
+                        let Some(override_score) = score_override(override_state, &override_rhs) else { continue };
 
                         overrides_data = Some(OverridesData::Operation {
                             kind: operation_kind,
@@ -435,7 +441,7 @@ impl DataSmart {
                         });
                     } else {
                         let overrides = split_overrides(expanded_lhs);
-                        let override_score = score_override(override_state, &overrides);
+                        let Some(override_score) = score_override(override_state, &overrides) else { continue };
 
                         overrides_data = Some(OverridesData::PureOverride {
                             overrides,
@@ -461,6 +467,7 @@ impl DataSmart {
         for op_group in &preprocessed {
             match *op_group.0 {
                 StmtKind::Assign => {
+                    // TODO: handle overrides in rhs of override data
                     let winning_assignment = op_group.1.iter().sorted_by_cached_key(|o| {
                         o.override_data.as_ref().map_or(0, |d| d.score())
                     }).last().unwrap();
@@ -469,7 +476,6 @@ impl DataSmart {
                         rhs_filter = od.override_filter();
                     }
 
-                    // TODO: handle overrides in rhs of override data
                     ret = winning_assignment.rhs.clone().into();
                 },
                 StmtKind::Remove => {
@@ -678,7 +684,7 @@ fn main() {
     d.set_var("TEST:bar", "testvalue2");
     d.set_var("TEST:foo", "testvalue4");
     d.set_var("TEST:some_val", "testvalue3 testvalue5");
-    d.set_var("TEST:some_val:remove", "testvalue3");
+    d.set_var("TEST:bar:foo:some_val:c", "winner");
     d.set_var("OVERRIDES", "foo:bar:some_val");
 
     //parse_value("${${M}}");
