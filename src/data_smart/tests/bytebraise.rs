@@ -15,6 +15,15 @@ basic_datasmart_test!(do_something, d, {
     assert_eq!(v, "QQQQQ");
 });
 
+basic_datasmart_test!(do_remove_expand, d, {
+    d.set_var("TEST", "1 2 3")?;
+    d.set_var("TEST_${Q}", "2")?;
+    d.set_var("Q", "remove")?;
+
+    let v = d.get_var("TEST").unwrap().unwrap();
+    assert_eq!(v, "QQQQQ");
+});
+
 #[test]
 fn var_expansion_regex_works() {
     let input = "${${foo}}";

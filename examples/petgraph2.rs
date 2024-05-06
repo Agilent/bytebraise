@@ -22,7 +22,7 @@ static VAR_EXPANSION_REGEX: Lazy<Regex> =
 static PYTHON_EXPANSION_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{@.+?}").unwrap());
 
 static KEYWORD_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?P<all>(?P<keyword>:append|:prepend|:remove)(?:$|:))").unwrap());
+    Lazy::new(|| Regex::new(r"(?P<all>(?:^|:)(?P<keyword>append|prepend|remove)(?:$|:))").unwrap());
 
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 
@@ -39,8 +39,6 @@ pub struct FifoHeap<T> {
 //  Q:${P} = "OK2"         <-- this is executed second
 //  Q:append = "me first"  <-- this is executed first
 //  OVERRIDES = "a"
-//    BUT thankfully we don't need to factor this into execution operation of statements. i.e.
-//    our binary heap approach still works :)
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 enum StmtKind {
     WeakDefault,
@@ -189,6 +187,37 @@ impl DataSmart {
         }
     }
 
+    fn apply_removes(&self, input: &String, removes: &HashSet<String>, level: usize) -> String {
+        // TODO only only content flag and if not parsing
+        let mut expanded_removes = HashMap::new();
+        for r in removes.iter() {
+            expanded_removes.insert(
+                r.clone(),
+                self.expand(r, level + 1)
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        let mut val = String::new();
+        for v in split_keep(&WHITESPACE_REGEX, input) {
+            let mut skip = false;
+            for r in removes.iter() {
+                if expanded_removes.get(r).unwrap().contains(&v.to_string()) {
+                    //parser.removes.as_mut().unwrap().insert(r.clone());
+                    skip = true;
+                }
+            }
+            if skip {
+                continue;
+            }
+            val += v;
+        }
+        val
+    }
+
     pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
         let var = var.into();
         let value = value.into();
@@ -201,11 +230,13 @@ impl DataSmart {
 
         let stmt_kind = match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
             None => StmtKind::Assign,
-            Some(":append") => StmtKind::Append,
-            Some(":prepend") => StmtKind::Prepend,
-            Some(":remove") => StmtKind::Remove,
+            Some("append") => StmtKind::Append,
+            Some("prepend") => StmtKind::Prepend,
+            Some("remove") => StmtKind::Remove,
             Some(_) => unreachable!(),
         };
+
+        eprintln!("statement match: {:?}", stmt_kind);
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             lhs: override_str.map(String::from),
@@ -305,14 +336,14 @@ impl DataSmart {
 
             for i in 0..5 {
                 eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":")
+                let s = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap_or_default(), ":")
                     .map(|s| String::from(s))
                     .collect::<IndexSet<String>>();
 
                 eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap(), ":")
+                let s2 = split_filter_empty(&self.get_var("OVERRIDES", level + 1).unwrap_or_default(), ":")
                     .map(|s| String::from(s))
                     .collect::<IndexSet<String>>();
 
@@ -405,6 +436,16 @@ impl DataSmart {
             rhs: String,
         }
 
+        impl PreprocessedOperationData {
+            fn is_override_operation(&self) -> bool {
+                match self.override_data {
+                    None => false,
+                    Some(OverridesData::PureOverride {..}) => false,
+                    Some(OverridesData::Operation {..}) => true,
+                }
+            }
+        }
+
         let mut preprocessed: IndexMap<StmtKind, Vec<PreprocessedOperationData>> = IndexMap::new();
 
         // Pre-process operations in the priority heap
@@ -423,9 +464,9 @@ impl DataSmart {
                         let c = locs.get(1).unwrap();
 
                         let operation_kind = match &expanded_lhs[c.0..c.1] {
-                            ":append" => OverrideOperation::Append,
-                            ":prepend" => OverrideOperation::Prepend,
-                            ":remove" => OverrideOperation::Remove,
+                            "append" => OverrideOperation::Append,
+                            "prepend" => OverrideOperation::Prepend,
+                            "remove" => OverrideOperation::Remove,
                             _ => unreachable!(),
                         };
 
@@ -460,23 +501,39 @@ impl DataSmart {
             preprocessed.insert(op_group.0, preprocessed_ops);
         }
 
-        eprintln!("{:#?}", preprocessed);
+        eprintln!("data: {:#?}", preprocessed);
 
         let mut rhs_filter: IndexSet<String> = IndexSet::new();
+        let mut deferred_operations = vec![];
 
         for op_group in &preprocessed {
             match *op_group.0 {
                 StmtKind::Assign => {
-                    // TODO: handle overrides in rhs of override data
-                    let winning_assignment = op_group.1.iter().sorted_by_cached_key(|o| {
+                    // Partition assignments into those that were resolved as operations and those that are pure assignments
+                    let partition: (Vec<_>, Vec<_>) = op_group.1.iter().partition(|a| a.is_override_operation());
+
+                    let winning_assignment = partition.1.iter().sorted_by_cached_key(|o| {
                         o.override_data.as_ref().map_or(0, |d| d.score())
                     }).last().unwrap();
 
+                    eprintln!("{:?}", partition.0);
+
+                    ret = winning_assignment.rhs.clone().into();
                     if let Some(od) = winning_assignment.override_data.as_ref() {
                         rhs_filter = od.override_filter();
                     }
 
-                    ret = winning_assignment.rhs.clone().into();
+                    // Now process operations
+                    for op in partition.0.iter() {
+                        if op.override_data.as_ref().map_or(true, |od| od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)) {
+                            match op.override_data.as_ref() {
+                                Some(OverridesData::Operation { kind, .. }) => {
+                                    deferred_operations.push((kind, op.rhs.clone()));
+                                },
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
                 },
                 StmtKind::Remove => {
                     let mut removes: HashSet<String> = HashSet::new();
@@ -486,106 +543,36 @@ impl DataSmart {
                         }
                     }
 
-                    // TODO only only content flag and if not parsing
-                    let mut expanded_removes = HashMap::new();
-                    for r in &removes {
-                        expanded_removes.insert(
-                            r.clone(),
-                            self.expand(r, level + 1)
-                                .unwrap()
-                                .split_whitespace()
-                                .map(|v| v.to_string())
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-
                     if let Some(ret) = &mut ret {
-                        let mut val = String::new();
-                        for v in split_keep(&WHITESPACE_REGEX, ret) {
-                            let mut skip = false;
-                            for r in &removes {
-                                if expanded_removes.get(r).unwrap().contains(&v.to_string()) {
-                                    //parser.removes.as_mut().unwrap().insert(r.clone());
-                                    skip = true;
-                                }
+                        let new_ret = self.apply_removes(ret, &removes, level + 1);
+                        *ret = new_ret;
+                    }
+                },
+                StmtKind::Append => {
+                    for append in op_group.1 {
+                        if append.override_data.as_ref().map_or(true, |od| od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)) {
+                            if ret.is_none() {
+                                ret = Some(String::new());
                             }
-                            if skip {
-                                continue;
-                            }
-                            val += v;
+
+                            let ret = ret.as_mut().unwrap();
+                            *ret += &append.rhs.clone();
                         }
-                        *ret = val;
+                    }
+                },
+                StmtKind::Prepend => {
+                    for prepend in op_group.1 {
+                        if ret.is_none() {
+                            ret = Some(String::new());
+                        }
+
+                        let ret = ret.as_mut().unwrap();
+                        *ret = format!("{}{}", prepend.rhs.clone(), ret);
                     }
                 }
                 _ => panic!("unimplemented"),
             }
         }
-
-        // // Iterate over operations in the priority heap, aggregated by operation type
-        // for op_group in &var_data.operations.heap.iter().group_by(|o| o.0.op_type) {
-        //     if op_group.0 == StmtKind::Assign {
-        //         let scored_ops = op_group
-        //             .1
-        //             .sorted_by_cached_key(|op2| {
-        //                 let assign_stmt = self.ds.node_weight(op2.0.idx).unwrap().statement();
-        //
-        //                 // TODO: cache LHS?
-        //                 assign_stmt.lhs.as_ref().map_or(0, |s| {
-        //                     let expanded_override_string = self.expand(&s, level + 1).unwrap();
-        //                     let operation_overrides =
-        //                         split_filter_empty(&expanded_override_string, ":")
-        //                             .map(|s| String::from(s))
-        //                             .collect::<IndexSet<String>>();
-        //                     score_override(override_state, &operation_overrides)
-        //                 })
-        //             })
-        //             .collect::<Vec<_>>();
-        //
-        //         let winning_op = scored_ops.last().unwrap();
-        //         let q = self.ds.node_weight(winning_op.0.idx).unwrap().statement();
-        //         ret = q.rhs.clone().into();
-        //
-        //         eprintln!("{:?}", scored_ops);
-        //     } else {
-        //         for op in op_group.1 {
-        //             let index = op.0.idx;
-        //             let q = self.ds.node_weight(index).unwrap().statement();
-        //
-        //             let mut run = false;
-        //             match &q.lhs {
-        //                 None => run = true,
-        //                 Some(override_str) => {
-        //                     let expanded_lhs = self.expand(&override_str, level + 1).unwrap();
-        //                     eprintln!("{:?}", expanded_lhs);
-        //                     let operation_overrides = split_filter_empty(&expanded_lhs, ":")
-        //                         .map(|s| String::from(s))
-        //                         .collect::<IndexSet<String>>();
-        //                     if let Some(overrides) = override_state {
-        //                         if operation_overrides.is_subset(overrides) {
-        //                             // TODO: record fact that an override was applied and add an edge to OVERRIDES on this statement node.
-        //                             run = true;
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //
-        //             match op_group.0 {
-        //                 StmtKind::Append => {
-        //                     if run {
-        //                         ret = ret.map(|s| s + " " + &*q.rhs.clone());
-        //                     }
-        //                 }
-        //                 StmtKind::Assign => {
-        //                     if run {
-        //                         eprintln!("= {}, {}", q.rhs, op.1);
-        //                         ret = q.rhs.clone().into();
-        //                     }
-        //                 }
-        //                 _ => unimplemented!(),
-        //             }
-        //         }
-        //     }
-        // }
 
         ret = ret.map(|s| self.expand(s, level + 1).unwrap());
         //*cached = ret.clone();
@@ -658,6 +645,26 @@ impl GraphItem {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use crate::DataSmart;
+
+    #[test]
+    fn wat() {
+        let mut d = DataSmart::new();
+
+        d.set_var("TEST", "a b c");
+        d.set_var("TEST:${A}", "b");
+        d.set_var("A", "remove");
+
+        //parse_value("${${M}}");
+
+        println!("\n");
+        //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
+        println!("TEST = {:?}\n", d.get_var("TEST", 0));
+    }
+}
+
 fn main() {
     let mut d = DataSmart::new();
 
@@ -677,15 +684,18 @@ fn main() {
     //d.set_var("PN", "waves");
     //d.set_var("B", "pn-waves");
     d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
+*/
 
-    d.set_var("A:append:${B}", "C");
-    d.set_var("A:${B}", "D");*/
+    d.set_var("TEST", "a b c");
+    d.set_var("TEST:${A}", "b");
+    d.set_var("A", "append");
+    d.set_var("TEST:append", "OK");
+    // d.set_var("TEST:prepend", "prep");
+    // d.set_var("TEST:${B}", "crazy");
+    // d.set_var("B", "prepend");
 
-    d.set_var("TEST:bar", "testvalue2");
-    d.set_var("TEST:foo", "testvalue4");
-    d.set_var("TEST:some_val", "testvalue3 testvalue5");
-    d.set_var("TEST:bar:foo:some_val:c", "winner");
-    d.set_var("OVERRIDES", "foo:bar:some_val");
+    //d.set_var("A:remove:C", "C");
+    //d.set_var("A:${B}", "D");
 
     //parse_value("${${M}}");
 
