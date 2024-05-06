@@ -366,6 +366,31 @@ impl DataSmart {
                     OverridesData::PureOverride { score, .. } => *score,
                 }
             }
+
+            fn override_filter(&self) -> IndexSet<String> {
+                match self {
+                    OverridesData::Operation { lhs, .. } => lhs.clone(),
+                    OverridesData::PureOverride { overrides, .. } => overrides.clone(),
+                }
+            }
+
+            fn is_valid_for_filter(&self, override_filter: &IndexSet<String>) -> bool {
+                // This is sensitive to order.
+                // TODO: add example bitbake code to demonstrate
+                match self {
+                    OverridesData::Operation { lhs, .. } => lhs.as_slice() == override_filter.as_slice(),
+                    OverridesData::PureOverride { overrides, .. } => overrides.as_slice() == override_filter.as_slice(),
+                }
+            }
+
+            fn is_active(&self, active_overrides: &Option<IndexSet<String>>) -> bool {
+                active_overrides.as_ref().map_or(false, |active_overrides| {
+                    match self {
+                        OverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
+                        OverridesData::PureOverride { overrides, .. } => overrides.is_subset(active_overrides),
+                    }
+                })
+            }
         }
 
         #[derive(Debug)]
@@ -431,6 +456,8 @@ impl DataSmart {
 
         eprintln!("{:#?}", preprocessed);
 
+        let mut rhs_filter: IndexSet<String> = IndexSet::new();
+
         for op_group in &preprocessed {
             match *op_group.0 {
                 StmtKind::Assign => {
@@ -438,14 +465,19 @@ impl DataSmart {
                         o.override_data.as_ref().map_or(0, |d| d.score())
                     }).last().unwrap();
 
+                    if let Some(od) = winning_assignment.override_data.as_ref() {
+                        rhs_filter = od.override_filter();
+                    }
+
                     // TODO: handle overrides in rhs of override data
                     ret = winning_assignment.rhs.clone().into();
                 },
                 StmtKind::Remove => {
                     let mut removes: HashSet<String> = HashSet::new();
                     for remove in op_group.1 {
-                        // TODO: check if override active
-                        removes.insert(remove.rhs.clone());
+                        if remove.override_data.as_ref().map_or(true, |od| od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)) {
+                            removes.insert(remove.rhs.clone());
+                        }
                     }
 
                     // TODO only only content flag and if not parsing
