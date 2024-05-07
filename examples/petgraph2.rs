@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::ptr;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hash;
 
 use fxhash::FxHashMap;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
@@ -101,7 +101,7 @@ enum VariableOperationKind {
     Remove,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum OverrideOperation {
     Remove,
     Prepend,
@@ -180,8 +180,7 @@ fn score_override(
 
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
-    let temp_cloned_active_overrides = active_overrides.clone()
-        .unwrap_or_default();
+    let temp_cloned_active_overrides = active_overrides.clone().unwrap_or_default();
     if !candidate_overrides.is_subset(&temp_cloned_active_overrides) {
         return None;
     }
@@ -201,6 +200,96 @@ fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
     split_filter_empty(input.as_ref(), ":")
         .map(String::from)
         .collect::<IndexSet<String>>()
+}
+
+#[derive(Debug, Clone)]
+enum OverridesData {
+    Operation {
+        lhs: IndexSet<String>,
+        kind: OverrideOperation,
+        rhs: IndexSet<String>,
+        score: u64,
+    },
+    PureOverride {
+        overrides: IndexSet<String>,
+        score: u64,
+    },
+}
+
+impl OverridesData {
+    fn score(&self) -> u64 {
+        match self {
+            OverridesData::Operation { score, .. } => *score,
+            OverridesData::PureOverride { score, .. } => *score,
+        }
+    }
+
+    fn override_filter(&self) -> IndexSet<String> {
+        match self {
+            OverridesData::Operation { lhs, .. } => lhs.clone(),
+            OverridesData::PureOverride { overrides, .. } => overrides.clone(),
+        }
+    }
+
+    fn is_valid_for_filter(&self, override_filter: &IndexSet<String>) -> bool {
+        // This is sensitive to order.
+        // TODO: add example bitbake code to demonstrate
+        match self {
+            OverridesData::Operation { lhs, .. } => {
+                lhs.is_empty() || lhs.as_slice() == override_filter.as_slice()
+            }
+            OverridesData::PureOverride { overrides, .. } => {
+                eprintln!("checking {:?} == {:?}", overrides, override_filter);
+                overrides.is_empty() || overrides.as_slice() == override_filter.as_slice()
+            }
+        }
+    }
+
+    fn is_active(&self, active_overrides: &Option<IndexSet<String>>) -> bool {
+        active_overrides
+            .as_ref()
+            .map_or(false, |active_overrides| match self {
+                OverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
+                OverridesData::PureOverride { overrides, .. } => {
+                    overrides.is_subset(active_overrides)
+                }
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreprocessedOperationData {
+    override_data: Option<OverridesData>,
+    // TODO: fold with above
+    full_override: String,
+    rhs: String,
+    op_type: StmtKind,
+    stmt_index: NodeIndex,
+}
+
+impl PreprocessedOperationData {
+    fn is_override_operation(&self) -> bool {
+        match self.override_data {
+            None => false,
+            Some(OverridesData::PureOverride { .. }) => false,
+            Some(OverridesData::Operation { .. }) => true,
+        }
+    }
+
+    fn override_operation(&self) -> Option<OverrideOperation> {
+        if let Some(OverridesData::Operation { kind, ..}) = &self.override_data {
+            return Some(*kind);
+        }
+
+        None
+    }
+
+    fn override_score(&self) -> u64 {
+        match &self.override_data {
+            None => 0,
+            Some(od) => od.score(),
+        }
+    }
 }
 
 impl DataSmart {
@@ -284,7 +373,7 @@ impl DataSmart {
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
 
-    fn expand<S: AsRef<str>>(&self, value: S, level: usize) -> DataSmartResult<String> {
+    pub fn expand<S: AsRef<str>>(&self, value: S, level: usize) -> DataSmartResult<String> {
         let value = value.as_ref();
 
         // |expand_state| is used to track which variables are accessed during an expansion, across
@@ -407,103 +496,22 @@ impl DataSmart {
             }
         }
 
-        // TODO: only do this if needed
+        // TODO: only do this if needed, i.e. if any operations with overrides are present
         self.compute_overrides(level + 1).unwrap();
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
-        #[derive(Debug, Clone)]
-        enum OverridesData {
-            Operation {
-                lhs: IndexSet<String>,
-                kind: OverrideOperation,
-                rhs: IndexSet<String>,
-                score: u64,
-            },
-            PureOverride {
-                overrides: IndexSet<String>,
-                score: u64,
-            },
-        }
+        let mut starting_value: Option<PreprocessedOperationData> = None;
 
-        impl OverridesData {
-            fn score(&self) -> u64 {
-                match self {
-                    OverridesData::Operation { score, .. } => *score,
-                    OverridesData::PureOverride { score, .. } => *score,
-                }
-            }
-
-            fn override_filter(&self) -> IndexSet<String> {
-                match self {
-                    OverridesData::Operation { lhs, .. } => lhs.clone(),
-                    OverridesData::PureOverride { overrides, .. } => overrides.clone(),
-                }
-            }
-
-            fn is_valid_for_filter(&self, override_filter: &IndexSet<String>) -> bool {
-                // This is sensitive to order.
-                // TODO: add example bitbake code to demonstrate
-                match self {
-                    OverridesData::Operation { lhs, .. } => {
-                        lhs.is_empty() || lhs.as_slice() == override_filter.as_slice()
-                    }
-                    OverridesData::PureOverride { overrides, .. } => {
-                        eprintln!("checking {:?} == {:?}", overrides, override_filter);
-                        overrides.is_empty() || overrides.as_slice() == override_filter.as_slice()
-                    }
-                }
-            }
-
-            fn is_active(&self, active_overrides: &Option<IndexSet<String>>) -> bool {
-                active_overrides
-                    .as_ref()
-                    .map_or(false, |active_overrides| match self {
-                        OverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
-                        OverridesData::PureOverride { overrides, .. } => {
-                            overrides.is_subset(active_overrides)
-                        }
-                    })
-            }
-        }
-
-        #[derive(Debug, Clone)]
-        struct PreprocessedOperationData {
-            override_data: Option<OverridesData>,
-            // TODO: fold with above
-            full_override: String,
-            rhs: String,
-            op_type: StmtKind,
-            stmt_index: NodeIndex,
-        }
-
-        impl PreprocessedOperationData {
-            fn is_override_operation(&self) -> bool {
-                match self.override_data {
-                    None => false,
-                    Some(OverridesData::PureOverride { .. }) => false,
-                    Some(OverridesData::Operation { .. }) => true,
-                }
-            }
-
-            fn override_score(&self) -> u64 {
-                match &self.override_data {
-                    None => 0,
-                    Some(od) => od.score(),
-                }
-            }
-        }
-
-        let count = var_data.operations.heap.len();
-
-        // Select the highest scoring operation in the heap to act as the starting value
-        let mut preprocessed2 = var_data.operations.heap
+        let mut preprocessed2 = var_data
+            .operations
+            .heap
             .iter()
             .filter_map(|op| {
                 let mut overrides_data: Option<OverridesData> = None;
-                let assign_stmt = self.ds.node_weight(op.0.idx).unwrap().statement();
-                let original_override = assign_stmt.lhs.clone().unwrap_or_default();
-                let expanded_lhs = assign_stmt
+                let statement = self.ds.node_weight(op.0.idx).unwrap().statement();
+                let original_override = statement.lhs.clone().unwrap_or_default();
+                let expanded_lhs = statement
                     .lhs
                     .as_ref()
                     .map(|s| self.expand(s, level + 1))
@@ -527,10 +535,13 @@ impl DataSmart {
 
                         let override_lhs = split_overrides(&expanded_lhs[0..c.0]);
                         let override_rhs = &expanded_lhs[c.1..];
+                        assert!(!override_lhs.contains(&String::from("remove")));
+
                         let Some(override_score) = score_override(override_state, &override_lhs)
-                            else {
-                                return None;
-                            };
+                        else {
+                            // Reject operations if the override is not active
+                            return None;
+                        };
 
                         overrides_data = Some(OverridesData::Operation {
                             kind: operation_kind,
@@ -540,10 +551,12 @@ impl DataSmart {
                         });
                     } else {
                         let overrides = split_overrides(expanded_lhs);
+                        assert!(!overrides.contains(&String::from("remove")));
                         let Some(override_score) = score_override(override_state, &overrides)
-                            else {
-                                return None;
-                            };
+                        else {
+                            // Reject operations if the override is not active
+                            return None;
+                        };
 
                         overrides_data = Some(OverridesData::PureOverride {
                             overrides,
@@ -552,43 +565,57 @@ impl DataSmart {
                     }
                 }
 
-                Some(PreprocessedOperationData {
+                let ret = PreprocessedOperationData {
                     override_data: overrides_data,
-                    rhs: assign_stmt.rhs.clone(),
+                    rhs: statement.rhs.clone(),
                     full_override: original_override,
                     op_type: op.0.op_type,
                     stmt_index: op.0.idx,
-                })
+                };
+
+                if starting_value.as_ref().map_or(true, |sv| {
+                    ret.op_type != StmtKind::Remove
+                        && ret.override_operation() != Some(OverrideOperation::Remove)
+                        && ret.override_score() >= sv.override_score()
+                }) {
+                    starting_value = Some(ret.clone());
+                }
+
+                Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
             .collect::<Vec<_>>();
 
-        let Some(starting_value) = preprocessed2
-            .iter()
-            .filter(|op| op.op_type != StmtKind::Remove)
-            .max_by_key(|op| op.override_score())
-            .cloned()
-            else {
+        let Some(starting_value) = starting_value else {
             return None;
         };
 
+        eprintln!("selected starting value: {:?}", starting_value);
+
         let mut ret: String = starting_value.rhs.clone();
 
-        preprocessed2.retain(|op|
+        // TODO: just filter in loop below
+        preprocessed2.retain(|op| {
             op.override_score() >= starting_value.override_score()
-            && op.stmt_index != starting_value.stmt_index
-        );
+                && op.stmt_index != starting_value.stmt_index
+                // TODO: correct?
+                && (op.op_type != StmtKind::Assign || op.is_override_operation())
+        });
 
         let preprocessed: IndexMap<StmtKind, Vec<PreprocessedOperationData>> = preprocessed2
             .iter()
             .map(Clone::clone)
-            .into_group_map_by(|op| op.op_type)
+            .into_index_map_by(|op| op.op_type)
             .into_iter()
             .collect();
 
         eprintln!("data: {:#?}", preprocessed);
 
-        let mut rhs_filter: IndexSet<String> = starting_value.override_data.as_ref().map(|od| od.override_filter()).unwrap_or_default();
+        let rhs_filter: IndexSet<String> = starting_value
+            .override_data
+            .as_ref()
+            .map(|od| od.override_filter())
+            .unwrap_or_default();
 
         // Use a map because in this code example, the append is applied once:
         //   TEST:${A} = "a"
@@ -604,19 +631,21 @@ impl DataSmart {
                     let partition: (Vec<_>, Vec<_>) =
                         op_group.1.iter().partition(|a| a.is_override_operation());
 
-                    let winning_assignment = partition
-                        .1
-                        .iter()
-                        .sorted_by_cached_key(|o| o.override_data.as_ref().map_or(0, |d| d.score()))
-                        .last()
-                        .unwrap();
+                    assert!(partition.1.is_empty(),"{:?}", partition.1);
 
-                    eprintln!("{:?}", partition.0);
-
-                    ret = winning_assignment.rhs.clone().into();
-                    if let Some(od) = winning_assignment.override_data.as_ref() {
-                        rhs_filter = od.override_filter();
-                    }
+                    // let winning_assignment = partition
+                    //     .1
+                    //     .iter()
+                    //     .sorted_by_cached_key(|o| o.override_data.as_ref().map_or(0, |d| d.score()))
+                    //     .last()
+                    //     .unwrap();
+                    //
+                    // eprintln!("{:?}", partition.0);
+                    //
+                    // ret = winning_assignment.rhs.clone().into();
+                    // if let Some(od) = winning_assignment.override_data.as_ref() {
+                    //     rhs_filter = od.override_filter();
+                    // }
 
                     // Now process operations
                     for op in partition.0.iter() {
@@ -628,8 +657,7 @@ impl DataSmart {
                                     OverrideOperation::Remove => {
                                         let removes: HashSet<String> =
                                             HashSet::from([op.rhs.clone()]);
-                                        let new_ret =
-                                            self.apply_removes(&ret, &removes, level + 1);
+                                        let new_ret = self.apply_removes(&ret, &removes, level + 1);
                                         ret = new_ret;
                                     }
                                     OverrideOperation::Append => {
@@ -691,6 +719,43 @@ impl DataSmart {
         Some(ret)
     }
 }
+/// Return an `IndexMap` of keys mapped to a list of their corresponding values.
+///
+/// Code based on [`.into_group_map()`](crate::Itertools::into_group_map)
+pub fn into_index_map<I, K, V>(iter: I) -> IndexMap<K, Vec<V>>
+where
+    I: Iterator<Item = (K, V)>,
+    K: Hash + Eq,
+{
+    let mut lookup = IndexMap::new();
+
+    iter.for_each(|(key, val)| {
+        lookup.entry(key).or_insert_with(Vec::new).push(val);
+    });
+
+    lookup
+}
+
+pub fn into_index_map_by<I, K, V>(iter: I, f: impl Fn(&V) -> K) -> IndexMap<K, Vec<V>>
+where
+    I: Iterator<Item = V>,
+    K: Hash + Eq,
+{
+    into_index_map(iter.map(|v| (f(&v), v)))
+}
+
+trait IntoIndexMap: Iterator {
+    fn into_index_map_by<K, V, F>(self, f: F) -> IndexMap<K, Vec<V>>
+    where
+        Self: Iterator<Item = V> + Sized,
+        K: Hash + Eq,
+        F: Fn(&V) -> K,
+    {
+        into_index_map_by(self, f)
+    }
+}
+
+impl<T> IntoIndexMap for T where T: Iterator + ?Sized {}
 
 #[derive(Debug)]
 struct Variable {
@@ -761,14 +826,288 @@ mod test {
     use crate::DataSmart;
 
     #[test]
+    fn none() {
+        let mut d = DataSmart::new();
+        assert_eq!(d.get_var("NOT_EXIST", 0), None);
+    }
+
+    #[test]
+    fn override_score() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+
+        assert_eq!(d.get_var("TEST", 0), Some("1".into()));
+    }
+
+    #[test]
+    fn override_score_2() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+        d.set_var("OVERRIDES", "more");
+
+        assert_eq!(d.get_var("TEST", 0), Some("2".into()));
+    }
+
+    #[test]
+    fn override_score_3() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+        d.set_var("OVERRIDES", "more:specific");
+
+        assert_eq!(d.get_var("TEST", 0), Some("3".into()));
+    }
+
+    #[test]
+    fn override_score_4() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+        d.set_var("TEST:more:specific", "4");
+        d.set_var("OVERRIDES", "more:specific");
+
+        assert_eq!(d.get_var("TEST", 0), Some("4".into()));
+    }
+
+    #[test]
+    fn override_score_5() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+        d.set_var("TEST:more:specific", "4");
+        d.set_var("TEST:more", "5");
+        d.set_var("TEST:more", "6");
+        d.set_var("OVERRIDES", "more");
+
+        assert_eq!(d.get_var("TEST", 0), Some("6".into()));
+    }
+
+    #[test]
+    fn override_score_6() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:specific", "3");
+        d.set_var("TEST:more:specific", "4");
+        d.set_var("TEST:more", "5");
+        d.set_var("TEST:more", "6");
+        d.set_var("OVERRIDES", "");
+
+        assert_eq!(d.get_var("TEST", 0), Some("1".into()));
+    }
+
+    #[test]
+    fn override_score_7() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:append", "2");
+
+        assert_eq!(d.get_var("TEST", 0), Some("12".into()));
+    }
+
+    #[test]
+    fn override_score_8() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+
+        assert_eq!(d.get_var("TEST", 0), Some("23".into()));
+    }
+
+    #[test]
+    fn override_score_9() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+
+        assert_eq!(d.get_var("TEST", 0), Some("234".into()));
+    }
+
+    #[test]
+    fn override_score_10() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:append:a", "NO");
+
+        assert_eq!(d.get_var("TEST", 0), Some("234".into()));
+    }
+
+    #[test]
+    fn override_score_11() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "BASE");
+        d.set_var("OVERRIDES", "b");
+
+        assert_eq!(d.get_var("TEST", 0), Some("BASE34".into()));
+    }
+
+    #[test]
+    fn override_score_12() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "BASE");
+        d.set_var("TEST:b", "OH YES");
+        d.set_var("OVERRIDES", "b");
+
+        assert_eq!(d.get_var("TEST", 0), Some("OH YESBASE34".into()));
+    }
+
+    #[test]
+    fn override_score_13() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "BASE");
+        d.set_var("TEST:b", "OH YES");
+        d.set_var("TEST:c", "WHAT");
+        d.set_var("OVERRIDES", "b:c");
+
+        assert_eq!(d.get_var("TEST", 0), Some("WHAT34".into()));
+    }
+
+    #[test]
+    fn override_score_14() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "BASE");
+        d.set_var("TEST:b", "OH YES");
+        d.set_var("TEST:c", "WHAT");
+        d.set_var("TEST:c:append", "!");
+        d.set_var("OVERRIDES", "b:c");
+
+        assert_eq!(d.get_var("TEST", 0), Some("WHAT!34".into()));
+    }
+
+    #[test]
+    fn override_score_15() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "BASE");
+        d.set_var("TEST:b", "OH YES");
+        d.set_var("TEST:c:prepend", "Q");
+        d.set_var("TEST:c", "WHAT");
+        d.set_var("TEST:c:append", "!");
+        d.set_var("OVERRIDES", "b:c");
+
+        assert_eq!(d.get_var("TEST", 0), Some("QWHAT!34".into()));
+    }
+
+    #[test]
+    fn override_score_16() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "10");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+
+        assert_eq!(d.get_var("TEST", 0), Some("34".into()));
+    }
+
+    #[test]
+    fn override_score_17() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST:append", "why?");
+        d.set_var("TEST:a:b:append", "first");
+        d.set_var("TEST:a:b:${OP}", "OP");
+        d.set_var("OP", "append");
+        d.set_var("OVERRIDES", "a:b");
+
+        assert_eq!(d.get_var("TEST", 0), Some("firstOPwhy?".into()));
+    }
+
+    #[test]
+    fn order_of_operations() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1 2 3");
+        d.set_var("TEST:${B}", "2");
+        d.set_var("TEST:append", " 4");
+        d.set_var("B", "remove");
+
+        assert_eq!(d.get_var("TEST", 0), Some("1  3 4".into()));
+    }
+
+    #[test]
+    fn indirection_1() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1 2 3");
+        d.set_var("TEST:${${B}}", "2");
+        d.set_var("B", "${W}");
+        d.set_var("W", "Q");
+        d.set_var("Q", "remove");
+
+        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:remove");
+        assert_eq!(d.get_var("TEST", 0), Some("1  3".into()));
+    }
+
+    #[test]
+    fn indirection_and_order() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1 2 3");
+
+        d.set_var("TEST:${${B}}", " 4 ");
+        d.set_var("B", "${W}");
+        d.set_var("W", "Q");
+        d.set_var("Q", "append");
+
+        d.set_var("TEST:append", " 5 ");
+
+        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
+        assert_eq!(d.get_var("TEST", 0), Some("1 2 3 5  4 ".into()));
+    }
+
+    #[test]
+    fn indirection_and_order_and_score() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1 2 3");
+
+        d.set_var("TEST:${${B}}", " 4 ");
+        d.set_var("B", "${W}");
+        d.set_var("W", "Q");
+        d.set_var("Q", "append");
+
+        d.set_var("TEST:append", " 5 ");
+
+        d.set_var("TEST:b:append", "OK");
+        d.set_var("OVERRIDES", "b");
+
+        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
+        assert_eq!(d.get_var("TEST", 0), Some("OK 5  4".into()));
+    }
+
+    #[test]
     fn wat() {
         let mut d = DataSmart::new();
 
         d.set_var("TEST", "a b c");
         d.set_var("TEST:${A}", "b");
         d.set_var("A", "remove");
-
-        //parse_value("${${M}}");
 
         println!("\n");
         //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
