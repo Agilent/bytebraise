@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 use fxhash::FxHashMap;
@@ -101,6 +101,56 @@ enum VariableOperationKind {
     Remove,
 }
 
+impl From<StmtKind> for VariableOperationKind {
+    fn from(value: StmtKind) -> Self {
+        match value {
+            StmtKind::Assign => Self::Assign,
+            StmtKind::Append => Self::Append,
+            StmtKind::WeakDefault => Self::WeakDefault,
+            StmtKind::PlusEqual => Self::PlusEqual,
+            StmtKind::EqualPlus => Self::EqualPlus,
+            StmtKind::DotEqual => Self::DotEqual,
+            StmtKind::EqualDot => Self::EqualDot,
+            StmtKind::Prepend => Self::Prepend,
+            StmtKind::Remove => Self::Remove,
+        }
+    }
+}
+
+impl Ord for VariableOperationKind {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.order_value().cmp(&other.order_value())
+    }
+}
+
+impl PartialOrd for VariableOperationKind {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl VariableOperationKind {
+    // Default (?=) is handled at parse time
+    fn order_value(&self) -> u8 {
+        match self {
+            VariableOperationKind::Assign
+            | VariableOperationKind::PlusEqual
+            | VariableOperationKind::EqualPlus
+            | VariableOperationKind::DotEqual
+            | VariableOperationKind::EqualDot => 1,
+            // ??=
+            VariableOperationKind::WeakDefault => 2,
+            // :remove
+            VariableOperationKind::Append => 3,
+            VariableOperationKind::SynthesizedAppend => 4,
+            // :prepend
+            VariableOperationKind::Prepend => 5,
+            VariableOperationKind::SynthesizedPrepend => 6,
+            // :remove
+            VariableOperationKind::Remove => 7,
+        }
+    }
+}
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum OverrideOperation {
     Remove,
@@ -144,6 +194,16 @@ impl<T: Ord> FifoHeap<T> {
         let seq = self.seq.checked_add(1).unwrap();
         self.seq = seq;
         self.heap.insert((val, seq));
+    }
+}
+
+impl<T: Ord> FromIterator<T> for FifoHeap<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut ret = FifoHeap::new();
+        for i in iter {
+            ret.push(i);
+        }
+        ret
     }
 }
 
@@ -202,11 +262,10 @@ fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
         .collect::<IndexSet<String>>()
 }
 
-#[derive(Debug, Clone)]
-enum OverridesData {
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum ResolvedOverridesData {
     Operation {
         lhs: IndexSet<String>,
-        kind: OverrideOperation,
         rhs: IndexSet<String>,
         score: u64,
     },
@@ -216,18 +275,11 @@ enum OverridesData {
     },
 }
 
-impl OverridesData {
-    fn score(&self) -> u64 {
-        match self {
-            OverridesData::Operation { score, .. } => *score,
-            OverridesData::PureOverride { score, .. } => *score,
-        }
-    }
-
+impl ResolvedOverridesData {
     fn override_filter(&self) -> IndexSet<String> {
         match self {
-            OverridesData::Operation { lhs, .. } => lhs.clone(),
-            OverridesData::PureOverride { overrides, .. } => overrides.clone(),
+            ResolvedOverridesData::Operation { lhs, .. } => lhs.clone(),
+            ResolvedOverridesData::PureOverride { overrides, .. } => overrides.clone(),
         }
     }
 
@@ -235,10 +287,10 @@ impl OverridesData {
         // This is sensitive to order.
         // TODO: add example bitbake code to demonstrate
         match self {
-            OverridesData::Operation { lhs, .. } => {
+            ResolvedOverridesData::Operation { lhs, .. } => {
                 lhs.is_empty() || lhs.as_slice() == override_filter.as_slice()
             }
-            OverridesData::PureOverride { overrides, .. } => {
+            ResolvedOverridesData::PureOverride { overrides, .. } => {
                 eprintln!("checking {:?} == {:?}", overrides, override_filter);
                 overrides.is_empty() || overrides.as_slice() == override_filter.as_slice()
             }
@@ -249,46 +301,52 @@ impl OverridesData {
         active_overrides
             .as_ref()
             .map_or(false, |active_overrides| match self {
-                OverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
-                OverridesData::PureOverride { overrides, .. } => {
+                ResolvedOverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
+                ResolvedOverridesData::PureOverride { overrides, .. } => {
                     overrides.is_subset(active_overrides)
                 }
             })
     }
 }
 
-#[derive(Debug, Clone)]
-struct PreprocessedOperationData {
-    override_data: Option<OverridesData>,
-    // TODO: fold with above
-    full_override: String,
-    rhs: String,
-    op_type: StmtKind,
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ResolvedVariableOperation {
+    overrides_data: Option<ResolvedOverridesData>,
+    op_type: VariableOperationKind,
+    value: String,
     stmt_index: NodeIndex,
 }
 
-impl PreprocessedOperationData {
-    fn is_override_operation(&self) -> bool {
-        match self.override_data {
-            None => false,
-            Some(OverridesData::PureOverride { .. }) => false,
-            Some(OverridesData::Operation { .. }) => true,
-        }
-    }
-
-    fn override_operation(&self) -> Option<OverrideOperation> {
-        if let Some(OverridesData::Operation { kind, ..}) = &self.override_data {
-            return Some(*kind);
-        }
-
-        None
-    }
-
+impl ResolvedVariableOperation {
     fn override_score(&self) -> u64 {
-        match &self.override_data {
+        match &self.overrides_data {
             None => 0,
-            Some(od) => od.score(),
+            Some(ResolvedOverridesData::Operation { score, .. }) => *score,
+            Some(ResolvedOverridesData::PureOverride { score, .. }) => *score,
         }
+    }
+
+    fn is_override_operation(&self) -> bool {
+        match self.overrides_data {
+            None => false,
+            Some(ResolvedOverridesData::PureOverride { .. }) => false,
+            Some(ResolvedOverridesData::Operation { .. }) => true,
+        }
+    }
+}
+
+impl Ord for ResolvedVariableOperation {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.override_score()
+            .cmp(&other.override_score())
+            .reverse()
+            .then(self.op_type.cmp(&other.op_type))
+    }
+}
+
+impl PartialOrd for ResolvedVariableOperation {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -501,14 +559,11 @@ impl DataSmart {
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
-        let mut starting_value: Option<PreprocessedOperationData> = None;
-
-        let mut preprocessed2 = var_data
+        let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
             .operations
             .heap
             .iter()
             .filter_map(|op| {
-                let mut overrides_data: Option<OverridesData> = None;
                 let statement = self.ds.node_weight(op.0.idx).unwrap().statement();
                 let original_override = statement.lhs.clone().unwrap_or_default();
                 let expanded_lhs = statement
@@ -517,6 +572,10 @@ impl DataSmart {
                     .map(|s| self.expand(s, level + 1))
                     .transpose()
                     .unwrap();
+
+                let mut var_op_kind: VariableOperationKind = op.0.op_type.into();
+
+                let mut resolved_od = None;
 
                 if let Some(expanded_lhs) = expanded_lhs {
                     let mut locs = KEYWORD_REGEX.capture_locations();
@@ -527,9 +586,22 @@ impl DataSmart {
                         let c = locs.get(1).unwrap();
 
                         let operation_kind = match &expanded_lhs[c.0..c.1] {
-                            "append" => OverrideOperation::Append,
-                            "prepend" => OverrideOperation::Prepend,
-                            "remove" => OverrideOperation::Remove,
+                            "append" => {
+                                if var_op_kind != VariableOperationKind::Append {
+                                    var_op_kind = VariableOperationKind::SynthesizedAppend;
+                                }
+                                OverrideOperation::Append
+                            }
+                            "prepend" => {
+                                if var_op_kind != VariableOperationKind::Prepend {
+                                    var_op_kind = VariableOperationKind::SynthesizedPrepend;
+                                }
+                                OverrideOperation::Prepend
+                            }
+                            "remove" => {
+                                var_op_kind = VariableOperationKind::Remove;
+                                OverrideOperation::Remove
+                            }
                             _ => unreachable!("{}", expanded_lhs),
                         };
 
@@ -543,8 +615,7 @@ impl DataSmart {
                             return None;
                         };
 
-                        overrides_data = Some(OverridesData::Operation {
-                            kind: operation_kind,
+                        resolved_od = Some(ResolvedOverridesData::Operation {
                             lhs: override_lhs,
                             rhs: split_overrides(override_rhs),
                             score: override_score,
@@ -558,159 +629,73 @@ impl DataSmart {
                             return None;
                         };
 
-                        overrides_data = Some(OverridesData::PureOverride {
+                        resolved_od = Some(ResolvedOverridesData::PureOverride {
                             overrides,
                             score: override_score,
-                        });
+                        })
                     }
                 }
 
-                let ret = PreprocessedOperationData {
-                    override_data: overrides_data,
-                    rhs: statement.rhs.clone(),
-                    full_override: original_override,
-                    op_type: op.0.op_type,
+                let ret = ResolvedVariableOperation {
+                    value: statement.rhs.clone(),
                     stmt_index: op.0.idx,
+                    overrides_data: resolved_od,
+                    op_type: var_op_kind,
                 };
-
-                if starting_value.as_ref().map_or(true, |sv| {
-                    ret.op_type != StmtKind::Remove
-                        && ret.override_operation() != Some(OverrideOperation::Remove)
-                        && ret.override_score() >= sv.override_score()
-                }) {
-                    starting_value = Some(ret.clone());
-                }
 
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        let Some(starting_value) = starting_value else {
+        let Some((resolved_start_value, _)) = resolved_variable_operations.heap.first().cloned()
+        else {
             return None;
         };
 
-        eprintln!("selected starting value: {:?}", starting_value);
-
-        let mut ret: String = starting_value.rhs.clone();
+        let mut ret: String = resolved_start_value.value.clone();
+        eprintln!("start value = {}", ret);
+        resolved_variable_operations.heap.retain(|(op, _)| { op.stmt_index != resolved_start_value.stmt_index });
+        eprintln!("remainder: {:#?}", resolved_variable_operations);
 
         // TODO: just filter in loop below
-        preprocessed2.retain(|op| {
-            op.override_score() >= starting_value.override_score()
-                && op.stmt_index != starting_value.stmt_index
-                // TODO: correct?
-                && (op.op_type != StmtKind::Assign || op.is_override_operation())
+        resolved_variable_operations.heap.retain(|(op, _)| {
+            op.override_score() >= resolved_start_value.override_score() ||
+                op.is_override_operation()
         });
 
-        let preprocessed: IndexMap<StmtKind, Vec<PreprocessedOperationData>> = preprocessed2
-            .iter()
-            .map(Clone::clone)
-            .into_index_map_by(|op| op.op_type)
-            .into_iter()
-            .collect();
+        eprintln!("{:#?}", resolved_variable_operations);
 
-        eprintln!("data: {:#?}", preprocessed);
-
-        let rhs_filter: IndexSet<String> = starting_value
-            .override_data
+        let rhs_filter: IndexSet<String> = resolved_start_value
+            .overrides_data
             .as_ref()
             .map(|od| od.override_filter())
             .unwrap_or_default();
 
-        // Use a map because in this code example, the append is applied once:
-        //   TEST:${A} = "a"
-        //   TEST:${A} = "a"
-        //   A = "append"
-        let mut deferred_appends: IndexMap<String, String> = IndexMap::new();
-        let mut deferred_prepends: IndexMap<String, String> = IndexMap::new();
-
-        for op_group in &preprocessed {
-            match *op_group.0 {
-                StmtKind::Assign => {
-                    // Partition assignments into those that were resolved as operations and those that are pure assignments
-                    let partition: (Vec<_>, Vec<_>) =
-                        op_group.1.iter().partition(|a| a.is_override_operation());
-
-                    assert!(partition.1.is_empty(),"{:?}", partition.1);
-
-                    // let winning_assignment = partition
-                    //     .1
-                    //     .iter()
-                    //     .sorted_by_cached_key(|o| o.override_data.as_ref().map_or(0, |d| d.score()))
-                    //     .last()
-                    //     .unwrap();
-                    //
-                    // eprintln!("{:?}", partition.0);
-                    //
-                    // ret = winning_assignment.rhs.clone().into();
-                    // if let Some(od) = winning_assignment.override_data.as_ref() {
-                    //     rhs_filter = od.override_filter();
-                    // }
-
-                    // Now process operations
-                    for op in partition.0.iter() {
-                        if op.override_data.as_ref().map_or(true, |od| {
-                            od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
-                        }) {
-                            match op.override_data.as_ref() {
-                                Some(OverridesData::Operation { kind, .. }) => match kind {
-                                    OverrideOperation::Remove => {
-                                        let removes: HashSet<String> =
-                                            HashSet::from([op.rhs.clone()]);
-                                        let new_ret = self.apply_removes(&ret, &removes, level + 1);
-                                        ret = new_ret;
-                                    }
-                                    OverrideOperation::Append => {
-                                        deferred_appends
-                                            .insert(op.full_override.clone(), op.rhs.clone());
-                                    }
-                                    OverrideOperation::Prepend => {
-                                        deferred_prepends
-                                            .insert(op.full_override.clone(), op.rhs.clone());
-                                    }
-                                },
-                                _ => unreachable!(),
-                            }
-                        }
-                    }
+        for (op, _) in &resolved_variable_operations.heap {
+            if !op.overrides_data.as_ref().map_or(true, |od| {
+                od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
+            }) {
+                continue;
+            }
+            match op.op_type {
+                VariableOperationKind::Assign => {
+                    ret = op.value.clone();
                 }
-                StmtKind::Remove => {
+                VariableOperationKind::Remove => {
                     let mut removes: HashSet<String> = HashSet::new();
-                    for remove in op_group.1 {
-                        if remove.override_data.as_ref().map_or(true, |od| {
-                            od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
-                        }) {
-                            removes.insert(remove.rhs.clone());
-                        }
-                    }
-
+                    removes.insert(op.value.clone());
                     let new_ret = self.apply_removes(&ret, &removes, level + 1);
                     ret = new_ret;
                 }
-                StmtKind::Append => {
-                    for append in op_group.1 {
-                        if append.override_data.as_ref().map_or(true, |od| {
-                            od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
-                        }) {
-                            ret += &append.rhs.clone();
-                        }
-                    }
+                VariableOperationKind::Append | VariableOperationKind::SynthesizedAppend => {
+                    ret += &op.value.clone();
                 }
-                StmtKind::Prepend => {
-                    for prepend in op_group.1 {
-                        ret = format!("{}{}", prepend.rhs.clone(), ret);
-                    }
+                VariableOperationKind::Prepend | VariableOperationKind::SynthesizedPrepend => {
+                    ret = format!("{}{}", op.value.clone(), ret);
                 }
                 _ => panic!("unimplemented"),
             }
-        }
-
-        for (_, append) in deferred_appends.drain(..) {
-            ret += &append.clone();
-        }
-
-        for (_, prepend) in deferred_prepends.drain(..) {
-            ret = format!("{}{}", prepend.clone(), ret);
         }
 
         ret = self.expand(ret, level + 1).unwrap();
@@ -1027,7 +1012,7 @@ mod test {
         d.set_var("TEST:append", "3");
         d.set_var("TEST:append", "4");
 
-        assert_eq!(d.get_var("TEST", 0), Some("34".into()));
+        assert_eq!(d.get_var("TEST", 0), Some("1034".into()));
     }
 
     #[test]
@@ -1098,7 +1083,7 @@ mod test {
         d.set_var("OVERRIDES", "b");
 
         assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
-        assert_eq!(d.get_var("TEST", 0), Some("OK 5  4".into()));
+        assert_eq!(d.get_var("TEST", 0), Some("OK 5  4 ".into()));
     }
 
     #[test]
