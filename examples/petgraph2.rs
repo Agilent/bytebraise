@@ -86,6 +86,21 @@ impl StmtKind {
     }
 }
 
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
+enum VariableOperationKind {
+    WeakDefault,
+    Assign,
+    PlusEqual,
+    EqualPlus,
+    DotEqual,
+    EqualDot,
+    Append,
+    SynthesizedAppend,
+    Prepend,
+    SynthesizedPrepend,
+    Remove,
+}
+
 #[derive(Debug)]
 enum OverrideOperation {
     Remove, Prepend, Append
@@ -235,8 +250,6 @@ impl DataSmart {
             Some("remove") => StmtKind::Remove,
             Some(_) => unreachable!(),
         };
-
-        eprintln!("statement match: {:?}", stmt_kind);
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             lhs: override_str.map(String::from),
@@ -433,6 +446,8 @@ impl DataSmart {
         #[derive(Debug)]
         struct PreprocessedOperationData {
             override_data: Option<OverridesData>,
+            // TODO: fold with above
+            full_override: String,
             rhs: String,
         }
 
@@ -455,6 +470,7 @@ impl DataSmart {
             for op in op_group.1 {
                 let mut overrides_data: Option<OverridesData> = None;
                 let assign_stmt = self.ds.node_weight(op.0.idx).unwrap().statement();
+                let original_override = assign_stmt.lhs.clone().unwrap_or_default();
                 let expanded_lhs = assign_stmt.lhs.as_ref().map(|s| self.expand(s, level + 1)).transpose().unwrap();
 
                 if let Some(expanded_lhs) = expanded_lhs {
@@ -494,6 +510,7 @@ impl DataSmart {
                 preprocessed_ops.push(PreprocessedOperationData {
                     override_data: overrides_data,
                     rhs: assign_stmt.rhs.clone(),
+                    full_override: original_override,
                 })
                 // TODO: place expanded LHS in the assignment cache?
             }
@@ -504,7 +521,9 @@ impl DataSmart {
         eprintln!("data: {:#?}", preprocessed);
 
         let mut rhs_filter: IndexSet<String> = IndexSet::new();
-        let mut deferred_operations = vec![];
+
+        let mut deferred_appends: IndexMap<String, String> = IndexMap::new();
+        let mut deferred_prepends: IndexMap<String, String> = IndexMap::new();
 
         for op_group in &preprocessed {
             match *op_group.0 {
@@ -528,7 +547,17 @@ impl DataSmart {
                         if op.override_data.as_ref().map_or(true, |od| od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)) {
                             match op.override_data.as_ref() {
                                 Some(OverridesData::Operation { kind, .. }) => {
-                                    deferred_operations.push((kind, op.rhs.clone()));
+                                    match kind {
+                                        OverrideOperation::Remove => {
+                                            let removes: HashSet<String> = HashSet::from([op.rhs.clone()]);
+                                            if let Some(ret) = &mut ret {
+                                                let new_ret = self.apply_removes(ret, &removes, level + 1);
+                                                *ret = new_ret;
+                                            }
+                                        },
+                                        OverrideOperation::Append => { deferred_appends.insert(op.full_override.clone(), op.rhs.clone()); }
+                                        OverrideOperation::Prepend => { deferred_prepends.insert(op.full_override.clone(), op.rhs.clone()); }
+                                    }
                                 },
                                 _ => unreachable!(),
                             }
@@ -572,6 +601,24 @@ impl DataSmart {
                 }
                 _ => panic!("unimplemented"),
             }
+        }
+
+        for (_, append) in deferred_appends.drain(..) {
+            if ret.is_none() {
+                ret = Some(String::new());
+            }
+
+            let ret = ret.as_mut().unwrap();
+            *ret += &append.clone();
+        }
+
+        for (_, prepend) in deferred_prepends.drain(..) {
+            if ret.is_none() {
+                ret = Some(String::new());
+            }
+
+            let ret = ret.as_mut().unwrap();
+            *ret = format!("{}{}", prepend.clone(), ret);
         }
 
         ret = ret.map(|s| self.expand(s, level + 1).unwrap());
@@ -688,7 +735,10 @@ fn main() {
 
     d.set_var("TEST", "a b c");
     d.set_var("TEST:${A}", "b");
+    d.set_var("TEST:${P}", "b");
+    d.set_var("P", "append");
     d.set_var("A", "append");
+    d.set_var("TEST:append", "OK");
     d.set_var("TEST:append", "OK");
     // d.set_var("TEST:prepend", "prep");
     // d.set_var("TEST:${B}", "crazy");
