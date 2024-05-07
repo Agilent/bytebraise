@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug};
 use std::hash::Hash;
 
 use fxhash::FxHashMap;
@@ -334,8 +334,12 @@ impl Ord for ResolvedVariableOperation {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.unexpanded_override == other.unexpanded_override
             && self.op_type == other.op_type
-            && matches!(self.op_type, VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend) {
-
+            && matches!(
+                self.op_type,
+                VariableOperationKind::SynthesizedAppend
+                    | VariableOperationKind::SynthesizedPrepend
+            )
+        {
             eprintln!("OK!!!");
             return Ordering::Equal;
         }
@@ -562,8 +566,6 @@ impl DataSmart {
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
-
-
         let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
             .operations
             .heap
@@ -658,13 +660,15 @@ impl DataSmart {
 
         let mut ret: String = resolved_start_value.value.clone();
         eprintln!("start value = {}", ret);
-        resolved_variable_operations.heap.retain(|(op, _)| { op.stmt_index != resolved_start_value.stmt_index });
+        resolved_variable_operations
+            .heap
+            .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
         eprintln!("remainder: {:#?}", resolved_variable_operations);
 
         // TODO: just filter in loop below
         resolved_variable_operations.heap.retain(|(op, _)| {
-            op.override_score() >= resolved_start_value.override_score() ||
-                op.is_override_operation()
+            op.override_score() >= resolved_start_value.override_score()
+                || op.is_override_operation()
         });
 
         eprintln!("{:#?}", resolved_variable_operations);
@@ -1028,6 +1032,23 @@ mod test {
         d.set_var("OVERRIDES", "a:b");
 
         assert_eq!(d.get_var("TEST", 0), Some("firstOPwhy?".into()));
+    }
+
+    #[test]
+    fn override_score_18() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST", "2");
+        d.set_var("TEST:append", "3");
+        d.set_var("TEST:append", "4");
+        d.set_var("TEST:b:append", "base");
+        d.set_var("TEST:b", "OH YES");
+        d.set_var("TEST:c:prepend", "Q");
+        d.set_var("TEST:c", "WHAT");
+        d.set_var("TEST:c:append", "!");
+        d.set_var("OVERRIDES", "b:c:");
+
+        assert_eq!(d.get_var("TEST", 0), Some("QWHAT!34".into()));
     }
 
     #[test]
