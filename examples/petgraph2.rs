@@ -151,12 +151,6 @@ impl VariableOperationKind {
         }
     }
 }
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum OverrideOperation {
-    Remove,
-    Prepend,
-    Append,
-}
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 struct VariableOperation {
@@ -312,6 +306,7 @@ impl ResolvedOverridesData {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ResolvedVariableOperation {
     overrides_data: Option<ResolvedOverridesData>,
+    unexpanded_override: String,
     op_type: VariableOperationKind,
     value: String,
     stmt_index: NodeIndex,
@@ -337,6 +332,14 @@ impl ResolvedVariableOperation {
 
 impl Ord for ResolvedVariableOperation {
     fn cmp(&self, other: &Self) -> Ordering {
+        if self.unexpanded_override == other.unexpanded_override
+            && self.op_type == other.op_type
+            && matches!(self.op_type, VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend) {
+
+            eprintln!("OK!!!");
+            return Ordering::Equal;
+        }
+
         self.override_score()
             .cmp(&other.override_score())
             .reverse()
@@ -559,6 +562,8 @@ impl DataSmart {
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
+
+
         let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
             .operations
             .heap
@@ -585,22 +590,19 @@ impl DataSmart {
                     {
                         let c = locs.get(1).unwrap();
 
-                        let operation_kind = match &expanded_lhs[c.0..c.1] {
+                        match &expanded_lhs[c.0..c.1] {
                             "append" => {
                                 if var_op_kind != VariableOperationKind::Append {
                                     var_op_kind = VariableOperationKind::SynthesizedAppend;
                                 }
-                                OverrideOperation::Append
                             }
                             "prepend" => {
                                 if var_op_kind != VariableOperationKind::Prepend {
                                     var_op_kind = VariableOperationKind::SynthesizedPrepend;
                                 }
-                                OverrideOperation::Prepend
                             }
                             "remove" => {
                                 var_op_kind = VariableOperationKind::Remove;
-                                OverrideOperation::Remove
                             }
                             _ => unreachable!("{}", expanded_lhs),
                         };
@@ -638,6 +640,7 @@ impl DataSmart {
 
                 let ret = ResolvedVariableOperation {
                     value: statement.rhs.clone(),
+                    unexpanded_override: original_override,
                     stmt_index: op.0.idx,
                     overrides_data: resolved_od,
                     op_type: var_op_kind,
@@ -1084,6 +1087,16 @@ mod test {
 
         assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
         assert_eq!(d.get_var("TEST", 0), Some("OK 5  4 ".into()));
+    }
+
+    #[test]
+    fn synthesized_appends() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "10");
+        d.set_var("TEST:${A}", "1");
+        d.set_var("TEST:${A}", "2");
+        d.set_var("A", "append");
+        assert_eq!(d.get_var("TEST", 0), Some("102".into()));
     }
 
     #[test]
