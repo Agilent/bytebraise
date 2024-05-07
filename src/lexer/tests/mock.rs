@@ -80,7 +80,7 @@ macro_rules! assert_tokenizes_as {
             let mut start = 0;
             let mut lexed_tokens = vec![];
             for token in $crate::lexer::tokenize($input) {
-                lexed_tokens.push(crate::lexer::tests::TokenMock {
+                lexed_tokens.push($crate::lexer::tests::TokenMock {
                     kind: token.kind,
                     len: token.len,
                     text: std::borrow::Cow::Borrowed(&$input[start..start + token.len])

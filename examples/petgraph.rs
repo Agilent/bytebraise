@@ -141,7 +141,7 @@ impl DataSmart {
                 _ => unreachable!(),
             }
         } else {
-            let index = self._create_variable_hierarchy(&*var_name);
+            let index = self._create_variable_hierarchy(&var_name);
             let Some(GraphItem::Variable(var_node)) = self.ds.node_weight_mut(index) else {
                 panic!()
             };

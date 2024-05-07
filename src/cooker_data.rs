@@ -62,6 +62,12 @@ pub struct CookerDataBuilder {
     data: DataSmart,
 }
 
+impl Default for CookerDataBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CookerDataBuilder {
     pub fn new() -> Self {
         // TODO BB_ORIGENV, worker vs server context, multiconfigs

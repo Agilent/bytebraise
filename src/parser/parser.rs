@@ -327,6 +327,24 @@ fn print(indent: usize, element: SyntaxElement) {
     }
 }
 
+// TODO error messages
+pub fn parse_bitbake_from_str(input: &str) -> Root {
+    let mut start = 0;
+    let tokens = tokenize(input).into_iter().map(|token| {
+        let text = &input[start..start + token.len];
+        start += token.len;
+        (syntax_kind_for_token_kind(token.kind), text)
+    });
+
+    let ast = Parser {
+        builder: GreenNodeBuilder::new(),
+        iter: tokens.peekable(),
+    }
+    .parse();
+
+    Root::cast(ast).unwrap()
+}
+
 #[cfg(test)]
 mod test {
 
@@ -387,22 +405,4 @@ deltask do_configure do_fetch
             println!("{:?}", i.syntax().text());
         }
     }
-}
-
-// TODO error messages
-pub fn parse_bitbake_from_str(input: &str) -> Root {
-    let mut start = 0;
-    let tokens = tokenize(input).into_iter().map(|token| {
-        let text = &input[start..start + token.len];
-        start += token.len;
-        (syntax_kind_for_token_kind(token.kind), text)
-    });
-
-    let ast = Parser {
-        builder: GreenNodeBuilder::new(),
-        iter: tokens.peekable(),
-    }
-    .parse();
-
-    Root::cast(ast).unwrap()
 }

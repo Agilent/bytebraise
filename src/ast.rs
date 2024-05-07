@@ -17,7 +17,7 @@ impl Debug for Expression {
                 write!(
                     fmt,
                     "Concatenate({})",
-                    exprs.into_iter().map(|v| format!("{:?}", v)).join(", ")
+                    exprs.iter().map(|v| format!("{:?}", v)).join(", ")
                 )
             }
             Expansion(ref var) => write!(fmt, "GetVar({})", var),

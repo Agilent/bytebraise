@@ -10,7 +10,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
-use regex::{CaptureLocations, Captures, Regex};
+use regex::{Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
@@ -125,6 +125,12 @@ impl PartialOrd for VariableOperation {
     }
 }
 
+impl<T: Ord> Default for FifoHeap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Ord> FifoHeap<T> {
     pub fn new() -> Self {
         FifoHeap {
@@ -173,9 +179,7 @@ fn score_override(
 
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
-    let temp_cloned_active_overrides = active_overrides
-        .as_ref()
-        .map(|a| a.clone())
+    let temp_cloned_active_overrides = active_overrides.clone()
         .unwrap_or_default();
     if !candidate_overrides.is_subset(&temp_cloned_active_overrides) {
         return None;
@@ -194,7 +198,7 @@ fn score_override(
 
 fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
     split_filter_empty(input.as_ref(), ":")
-        .map(|s| String::from(s))
+        .map(String::from)
         .collect::<IndexSet<String>>()
 }
 
@@ -307,7 +311,7 @@ impl DataSmart {
         while value.contains("${") {
             println!("{}EXPAND: {}", " ".repeat(level), value);
             let new_value = replace_all(
-                &*VAR_EXPANSION_REGEX,
+                &VAR_EXPANSION_REGEX,
                 value.as_str(),
                 |caps: &Captures| -> DataSmartResult<String> {
                     let match_str = caps.get(0).unwrap().as_str();
@@ -360,7 +364,7 @@ impl DataSmart {
                     &self.get_var("OVERRIDES", level + 1).unwrap_or_default(),
                     ":",
                 )
-                .map(|s| String::from(s))
+                .map(String::from)
                 .collect::<IndexSet<String>>();
 
                 eprintln!("{} set overides = {:?}", " ".repeat(level), s);
@@ -370,7 +374,7 @@ impl DataSmart {
                     &self.get_var("OVERRIDES", level + 1).unwrap_or_default(),
                     ":",
                 )
-                .map(|s| String::from(s))
+                .map(String::from)
                 .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
@@ -397,7 +401,7 @@ impl DataSmart {
         let var_data = w.variable();
 
         if var != "OVERRIDES" {
-            let mut cached = RefCell::borrow_mut(&var_data.cached_value);
+            let cached = RefCell::borrow_mut(&var_data.cached_value);
             if cached.is_some() {
                 return cached.clone();
             }

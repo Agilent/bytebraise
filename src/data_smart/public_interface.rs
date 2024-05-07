@@ -18,6 +18,12 @@ pub struct DataSmart {
     pub(crate) data: Rc<RefCell<DataSmartInner>>,
 }
 
+impl Default for DataSmart {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataSmart {
     pub fn new() -> DataSmart {
         DataSmart {

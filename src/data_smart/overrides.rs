@@ -22,6 +22,12 @@ pub struct PerVarOverrideData {
     data: im_rc::HashMap<String, Vec<VarAndOverrideTuple>>,
 }
 
+impl Default for PerVarOverrideData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerVarOverrideData {
     pub fn new() -> Self {
         PerVarOverrideData {

@@ -94,7 +94,7 @@ impl ListVarEditor {
             .fold(values, |mut values, action| match action.kind {
                 EditActionKind::Set => action.values.clone(),
                 EditActionKind::Add => {
-                    values.extend(action.values.clone().into_iter());
+                    values.extend(action.values.clone());
                     values
                 }
                 EditActionKind::Remove => {
