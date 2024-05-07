@@ -13,9 +13,11 @@ use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
 use scopeguard::{defer, guard, ScopeGuard};
+use triple_arena::{OrdArena, ptr_struct};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
 use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
+use crate::VariableOperationKind::SynthesizedPrepend;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -332,13 +334,13 @@ impl ResolvedVariableOperation {
 
 impl Ord for ResolvedVariableOperation {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.unexpanded_override == other.unexpanded_override
-            && self.op_type == other.op_type
-            && matches!(self.op_type, VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend) {
-
-            eprintln!("OK!!!");
-            return Ordering::Equal;
-        }
+        // if self.unexpanded_override == other.unexpanded_override
+        //     && self.op_type == other.op_type
+        //     && matches!(self.op_type, VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend) {
+        //
+        //     eprintln!("OK!!!");
+        //     return Ordering::Equal;
+        // }
 
         self.override_score()
             .cmp(&other.override_score())
@@ -562,9 +564,12 @@ impl DataSmart {
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
+        ptr_struct!(P0);
 
+        let mut resolved_variable_operations: OrdArena<P0, (ResolvedVariableOperation, usize), ()> = OrdArena::new();
+        let mut seq = 0;
 
-        let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
+        let items = var_data
             .operations
             .heap
             .iter()
@@ -648,24 +653,35 @@ impl DataSmart {
 
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
-            })
-            .collect();
+            });
 
-        let Some((resolved_start_value, _)) = resolved_variable_operations.heap.first().cloned()
+        let mut synthesized_appends: HashMap<String, P0> = HashMap::new();
+
+
+        for item in items {
+            let r = resolved_variable_operations.insert((item.clone(), seq), ());
+
+            if item.op_type == VariableOperationKind::SynthesizedAppend {
+                if synthesized_appends.contains_key(&item.unexpanded_override) {
+                    resolved_variable_operations.remove(synthesized_appends[&item.unexpanded_override]);
+                }
+
+                synthesized_appends.insert(item.unexpanded_override.clone(), r.0);
+            }
+
+            seq += 1;
+        }
+
+        let Some(resolved_start_value) = resolved_variable_operations.first()
         else {
             return None;
         };
 
+        let (resolved_start_value, _) = resolved_variable_operations.remove(resolved_start_value).unwrap().0;
+
         let mut ret: String = resolved_start_value.value.clone();
         eprintln!("start value = {}", ret);
-        resolved_variable_operations.heap.retain(|(op, _)| { op.stmt_index != resolved_start_value.stmt_index });
         eprintln!("remainder: {:#?}", resolved_variable_operations);
-
-        // TODO: just filter in loop below
-        resolved_variable_operations.heap.retain(|(op, _)| {
-            op.override_score() >= resolved_start_value.override_score() ||
-                op.is_override_operation()
-        });
 
         eprintln!("{:#?}", resolved_variable_operations);
 
@@ -675,7 +691,11 @@ impl DataSmart {
             .map(|od| od.override_filter())
             .unwrap_or_default();
 
-        for (op, _) in &resolved_variable_operations.heap {
+        for (_, (op, _), _) in resolved_variable_operations.iter() {
+            if op.override_score() < resolved_start_value.override_score() && !op.is_override_operation() {
+                continue;
+            }
+
             if !op.overrides_data.as_ref().map_or(true, |od| {
                 od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
             }) {

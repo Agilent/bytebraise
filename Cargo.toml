@@ -33,6 +33,7 @@ regex = { version = "1", features = ["pattern"] }
 rowan = "0.15.11"
 scopeguard = "1"
 thiserror = "1"
+triple_arena = "0.13.0"
 pretty_assertions = "1"
 unicode-segmentation = "1"
 
