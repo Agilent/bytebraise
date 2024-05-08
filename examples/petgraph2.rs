@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::{Debug};
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 use fxhash::FxHashMap;
@@ -399,7 +399,27 @@ impl DataSmart {
         val
     }
 
-    pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+    pub fn plus_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::PlusEqual, true);
+    }
+
+    pub fn equals_plus_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::EqualPlus, true);
+    }
+
+    pub fn equals_dot_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::EqualDot, true);
+    }
+
+    pub fn dot_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::DotEqual, true);
+    }
+
+    pub fn weak_default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::WeakDefault, true);
+    }
+
+    fn set_var_ex<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S, stmt_kind: StmtKind, check_keyword: bool) {
         let var = var.into();
         let value = value.into();
 
@@ -407,15 +427,14 @@ impl DataSmart {
         let base = var_parts.map_or(var.as_str(), |parts| parts.0);
         let override_str = var_parts.map(|parts| parts.1);
 
-        let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
+        if check_keyword {
+            let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-        let stmt_kind = match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
-            None => StmtKind::Assign,
-            Some("append") => StmtKind::Append,
-            Some("prepend") => StmtKind::Prepend,
-            Some("remove") => StmtKind::Remove,
-            Some(_) => unreachable!(),
-        };
+            match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
+                Some(_) => unimplemented!(),
+                _ => {}
+            };
+        }
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             lhs: override_str.map(String::from),
@@ -436,6 +455,26 @@ impl DataSmart {
         });
 
         self.ds.add_edge(*var_entry, stmt_idx, ());
+    }
+
+    pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        let var = var.into();
+        let value = value.into();
+
+        let var_parts = var.split_once(':');
+        let override_str = var_parts.map(|parts| parts.1);
+
+        let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
+
+        let stmt_kind = match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
+            None => StmtKind::Assign,
+            Some("append") => StmtKind::Append,
+            Some("prepend") => StmtKind::Prepend,
+            Some("remove") => StmtKind::Remove,
+            Some(_) => unreachable!(),
+        };
+
+        self.set_var_ex(var, value, stmt_kind, false);
     }
 
     pub fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
@@ -658,8 +697,48 @@ impl DataSmart {
             return None;
         };
 
-        let mut ret: String = resolved_start_value.value.clone();
-        eprintln!("start value = {}", ret);
+        #[derive(Debug)]
+        enum RetValue {
+            Eager(String),
+            WeakDefault(String),
+        }
+
+        impl From<RetValue> for String {
+            fn from(value: RetValue) -> Self {
+                match value {
+                    RetValue::Eager(s) => s,
+                    RetValue::WeakDefault(s) => s,
+                }
+            }
+        }
+
+        impl AsRef<str> for RetValue {
+            fn as_ref(&self) -> &str {
+                match self {
+                    RetValue::Eager(s) => s.as_ref(),
+                    RetValue::WeakDefault(s) => s.as_ref(),
+                }
+            }
+        }
+
+        impl Display for RetValue {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.as_ref().to_string())
+            }
+        }
+
+        let mut ret =  match resolved_start_value.op_type {
+            VariableOperationKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.value.clone()),
+            _ => {
+                RetValue::Eager(match resolved_start_value.op_type {
+                    VariableOperationKind::PlusEqual => format!(" {}", resolved_start_value.value),
+                    VariableOperationKind::EqualPlus => format!("{} ", resolved_start_value.value),
+                    _ => resolved_start_value.value.clone(),
+                })
+            }
+        };
+
+        eprintln!("start value = {:?}", ret);
         resolved_variable_operations
             .heap
             .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
@@ -686,29 +765,56 @@ impl DataSmart {
                 continue;
             }
             match op.op_type {
+                // Weak default is handled the same as assign - priority selection happened above
                 VariableOperationKind::Assign => {
-                    ret = op.value.clone();
+                    ret = RetValue::Eager(op.value.clone());
+                }
+                VariableOperationKind::WeakDefault => {
+                    if !matches!(ret, RetValue::Eager(_)) {
+                        ret = RetValue::WeakDefault(op.value.clone());
+                    }
                 }
                 VariableOperationKind::Remove => {
+                    // TODO: aggregate all removes and do it in one shot?
                     let mut removes: HashSet<String> = HashSet::new();
                     removes.insert(op.value.clone());
-                    let new_ret = self.apply_removes(&ret, &removes);
-                    ret = new_ret;
+                    let new_ret = self.apply_removes(&ret.into(), &removes);
+                    ret = RetValue::Eager(new_ret);
                 }
                 VariableOperationKind::Append | VariableOperationKind::SynthesizedAppend => {
-                    ret += &op.value.clone();
+                    ret = RetValue::Eager(ret.to_string() + &op.value);
+                }
+                VariableOperationKind::DotEqual => {
+                    if matches!(ret, RetValue::Eager(_)) {
+                        ret = RetValue::Eager(ret.to_string() + &op.value);
+                    }
                 }
                 VariableOperationKind::Prepend | VariableOperationKind::SynthesizedPrepend => {
-                    ret = format!("{}{}", op.value.clone(), ret);
+                    ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
+                }
+                VariableOperationKind::EqualDot => {
+                    if matches!(ret, RetValue::Eager(_)) {
+                        ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
+                    }
+                }
+                VariableOperationKind::PlusEqual => {
+                    if matches!(ret, RetValue::Eager(_)) {
+                        ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.value));
+                    }
+                }
+                VariableOperationKind::EqualPlus => {
+                    if matches!(ret, RetValue::Eager(_)) {
+                        ret = RetValue::Eager(format!("{} {}", op.value, ret.as_ref()));
+                    }
                 }
                 _ => panic!("unimplemented"),
             }
         }
 
-        ret = self.expand(ret).unwrap();
+        let ret_str = self.expand(ret.as_ref()).unwrap();
         //*cached = ret.clone();
 
-        Some(ret)
+        Some(ret_str)
     }
 }
 /// Return an `IndexMap` of keys mapped to a list of their corresponding values.
@@ -1118,6 +1224,98 @@ mod test {
         d.set_var("TEST:${A}", "2");
         d.set_var("A", "append");
         assert_eq!(d.get_var("TEST"), Some("102".into()));
+    }
+
+    #[test]
+    fn plus_equals() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "base");
+        d.plus_equals_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("base 2".into()));
+    }
+
+    #[test]
+    fn plus_equals_no_base() {
+        let mut d = DataSmart::new();
+        d.plus_equals_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some(" 2".into()));
+    }
+
+    #[test]
+    fn dot_equals() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "base");
+        d.dot_equals_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("base2".into()));
+    }
+
+    #[test]
+    fn dot_equals_no_base() {
+        let mut d = DataSmart::new();
+        d.dot_equals_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn equals_plus() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "base");
+        d.equals_plus_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2 base".into()));
+    }
+
+    #[test]
+    fn equals_plus_no_base() {
+        let mut d = DataSmart::new();
+        d.equals_plus_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2 ".into()));
+    }
+
+    #[test]
+    fn equals_dot() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "base");
+        d.equals_dot_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2base".into()));
+    }
+
+    #[test]
+    fn equals_dot_no_base() {
+        let mut d = DataSmart::new();
+        d.dot_equals_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn weak_default() {
+        let mut d = DataSmart::new();
+        d.weak_default_var("TEST", "2");
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn weak_default_2() {
+        let mut d = DataSmart::new();
+        d.weak_default_var("TEST", "2");
+        d.weak_default_var("TEST", "3");
+        d.weak_default_var("TEST", "4");
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
+    }
+
+    #[test]
+    fn weak_default_doc_example() {
+        let mut d = DataSmart::new();
+        d.weak_default_var("W", "x");
+        d.plus_equals_var("W", "y");
+        assert_eq!(d.get_var("W"), Some(" y".into()));
+    }
+
+    #[test]
+    fn weak_default_priority() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "2");
+        d.weak_default_var("TEST", "3");
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
     }
 
     #[test]
