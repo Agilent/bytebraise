@@ -368,13 +368,13 @@ impl DataSmart {
         }
     }
 
-    fn apply_removes(&self, input: &String, removes: &HashSet<String>, level: usize) -> String {
+    fn apply_removes(&self, input: &String, removes: &HashSet<String>) -> String {
         // TODO only only content flag and if not parsing
         let mut expanded_removes = HashMap::new();
         for r in removes.iter() {
             expanded_removes.insert(
                 r.clone(),
-                self.expand(r, level + 1)
+                self.expand(r)
                     .unwrap()
                     .split_whitespace()
                     .map(|v| v.to_string())
@@ -438,7 +438,7 @@ impl DataSmart {
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
 
-    pub fn expand<S: AsRef<str>>(&self, value: S, level: usize) -> DataSmartResult<String> {
+    pub fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
         let value = value.as_ref();
 
         // |expand_state| is used to track which variables are accessed during an expansion, across
@@ -464,7 +464,7 @@ impl DataSmart {
 
         let mut value = value.to_string();
         while value.contains("${") {
-            println!("{}EXPAND: {}", " ".repeat(level), value);
+            //println!("{}EXPAND: {}", " ".repeat(level), value);
             let new_value = replace_all(
                 &VAR_EXPANSION_REGEX,
                 value.as_str(),
@@ -472,7 +472,7 @@ impl DataSmart {
                     let match_str = caps.get(0).unwrap().as_str();
                     let referenced_var = &match_str[2..match_str.len() - 1];
 
-                    println!("{} expand: {}", " ".repeat(level), referenced_var);
+                    //println!("{} expand: {}", " ".repeat(level), referenced_var);
                     {
                         let mut s = RefCell::borrow_mut(&self.expand_state);
                         let set = s.as_mut().unwrap();
@@ -493,7 +493,7 @@ impl DataSmart {
                     }
 
                     Ok(self
-                        .get_var(referenced_var, level + 1)
+                        .get_var(referenced_var)
                         .unwrap_or(match_str.to_string()))
                 },
             )?;
@@ -507,26 +507,26 @@ impl DataSmart {
         Ok(value)
     }
 
-    fn compute_overrides(&self, level: usize) -> DataSmartResult<()> {
+    fn compute_overrides(&self) -> DataSmartResult<()> {
         if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
             if RefCell::borrow(&self.active_overrides).is_some() {
                 return Ok(());
             }
 
             for i in 0..5 {
-                eprintln!("{}+ override iteration {}", " ".repeat(level), i);
+                //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
                 let s = split_filter_empty(
-                    &self.get_var("OVERRIDES", level + 1).unwrap_or_default(),
+                    &self.get_var("OVERRIDES").unwrap_or_default(),
                     ":",
                 )
                 .map(String::from)
                 .collect::<IndexSet<String>>();
 
-                eprintln!("{} set overides = {:?}", " ".repeat(level), s);
+                //eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
                 let s2 = split_filter_empty(
-                    &self.get_var("OVERRIDES", level + 1).unwrap_or_default(),
+                    &self.get_var("OVERRIDES").unwrap_or_default(),
                     ":",
                 )
                 .map(String::from)
@@ -543,12 +543,12 @@ impl DataSmart {
         Ok(())
     }
 
-    pub fn get_var<S: AsRef<str>>(&self, var: S, level: usize) -> Option<String> {
+    pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
         let var = var.as_ref();
 
         // TODO: handle override syntax, e.g. getVar("A:pn-waves")
         let var_entry = self.vars.get(var)?;
-        println!("{}get_var = {}", " ".repeat(level), var);
+        //println!("{}get_var = {}", " ".repeat(level), var);
 
         let w = self.ds.node_weight(*var_entry).unwrap();
         let var_data = w.variable();
@@ -562,7 +562,7 @@ impl DataSmart {
         }
 
         // TODO: only do this if needed, i.e. if any operations with overrides are present
-        self.compute_overrides(level + 1).unwrap();
+        self.compute_overrides().unwrap();
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
@@ -576,7 +576,7 @@ impl DataSmart {
                 let expanded_lhs = statement
                     .lhs
                     .as_ref()
-                    .map(|s| self.expand(s, level + 1))
+                    .map(|s| self.expand(s))
                     .transpose()
                     .unwrap();
 
@@ -692,7 +692,7 @@ impl DataSmart {
                 VariableOperationKind::Remove => {
                     let mut removes: HashSet<String> = HashSet::new();
                     removes.insert(op.value.clone());
-                    let new_ret = self.apply_removes(&ret, &removes, level + 1);
+                    let new_ret = self.apply_removes(&ret, &removes);
                     ret = new_ret;
                 }
                 VariableOperationKind::Append | VariableOperationKind::SynthesizedAppend => {
@@ -705,7 +705,7 @@ impl DataSmart {
             }
         }
 
-        ret = self.expand(ret, level + 1).unwrap();
+        ret = self.expand(ret).unwrap();
         //*cached = ret.clone();
 
         Some(ret)
@@ -820,7 +820,7 @@ mod test {
     #[test]
     fn none() {
         let mut d = DataSmart::new();
-        assert_eq!(d.get_var("NOT_EXIST", 0), None);
+        assert_eq!(d.get_var("NOT_EXIST"), None);
     }
 
     #[test]
@@ -830,7 +830,7 @@ mod test {
         d.set_var("TEST:more", "2");
         d.set_var("TEST:more:specific", "3");
 
-        assert_eq!(d.get_var("TEST", 0), Some("1".into()));
+        assert_eq!(d.get_var("TEST"), Some("1".into()));
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod test {
         d.set_var("TEST:more:specific", "3");
         d.set_var("OVERRIDES", "more");
 
-        assert_eq!(d.get_var("TEST", 0), Some("2".into()));
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
     }
 
     #[test]
@@ -852,7 +852,7 @@ mod test {
         d.set_var("TEST:more:specific", "3");
         d.set_var("OVERRIDES", "more:specific");
 
-        assert_eq!(d.get_var("TEST", 0), Some("3".into()));
+        assert_eq!(d.get_var("TEST"), Some("3".into()));
     }
 
     #[test]
@@ -864,7 +864,7 @@ mod test {
         d.set_var("TEST:more:specific", "4");
         d.set_var("OVERRIDES", "more:specific");
 
-        assert_eq!(d.get_var("TEST", 0), Some("4".into()));
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
     }
 
     #[test]
@@ -878,7 +878,7 @@ mod test {
         d.set_var("TEST:more", "6");
         d.set_var("OVERRIDES", "more");
 
-        assert_eq!(d.get_var("TEST", 0), Some("6".into()));
+        assert_eq!(d.get_var("TEST"), Some("6".into()));
     }
 
     #[test]
@@ -892,7 +892,7 @@ mod test {
         d.set_var("TEST:more", "6");
         d.set_var("OVERRIDES", "");
 
-        assert_eq!(d.get_var("TEST", 0), Some("1".into()));
+        assert_eq!(d.get_var("TEST"), Some("1".into()));
     }
 
     #[test]
@@ -901,7 +901,7 @@ mod test {
         d.set_var("TEST", "1");
         d.set_var("TEST:append", "2");
 
-        assert_eq!(d.get_var("TEST", 0), Some("12".into()));
+        assert_eq!(d.get_var("TEST"), Some("12".into()));
     }
 
     #[test]
@@ -911,7 +911,7 @@ mod test {
         d.set_var("TEST", "2");
         d.set_var("TEST:append", "3");
 
-        assert_eq!(d.get_var("TEST", 0), Some("23".into()));
+        assert_eq!(d.get_var("TEST"), Some("23".into()));
     }
 
     #[test]
@@ -922,7 +922,7 @@ mod test {
         d.set_var("TEST:append", "3");
         d.set_var("TEST:append", "4");
 
-        assert_eq!(d.get_var("TEST", 0), Some("234".into()));
+        assert_eq!(d.get_var("TEST"), Some("234".into()));
     }
 
     #[test]
@@ -934,7 +934,7 @@ mod test {
         d.set_var("TEST:append", "4");
         d.set_var("TEST:append:a", "NO");
 
-        assert_eq!(d.get_var("TEST", 0), Some("234".into()));
+        assert_eq!(d.get_var("TEST"), Some("234".into()));
     }
 
     #[test]
@@ -947,7 +947,7 @@ mod test {
         d.set_var("TEST:b:append", "BASE");
         d.set_var("OVERRIDES", "b");
 
-        assert_eq!(d.get_var("TEST", 0), Some("BASE34".into()));
+        assert_eq!(d.get_var("TEST"), Some("BASE34".into()));
     }
 
     #[test]
@@ -961,7 +961,7 @@ mod test {
         d.set_var("TEST:b", "OH YES");
         d.set_var("OVERRIDES", "b");
 
-        assert_eq!(d.get_var("TEST", 0), Some("OH YESBASE34".into()));
+        assert_eq!(d.get_var("TEST"), Some("OH YESBASE34".into()));
     }
 
     #[test]
@@ -976,7 +976,7 @@ mod test {
         d.set_var("TEST:c", "WHAT");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST", 0), Some("WHAT34".into()));
+        assert_eq!(d.get_var("TEST"), Some("WHAT34".into()));
     }
 
     #[test]
@@ -992,7 +992,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST", 0), Some("WHAT!34".into()));
+        assert_eq!(d.get_var("TEST"), Some("WHAT!34".into()));
     }
 
     #[test]
@@ -1009,7 +1009,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST", 0), Some("QWHAT!34".into()));
+        assert_eq!(d.get_var("TEST"), Some("QWHAT!34".into()));
     }
 
     #[test]
@@ -1019,7 +1019,7 @@ mod test {
         d.set_var("TEST:append", "3");
         d.set_var("TEST:append", "4");
 
-        assert_eq!(d.get_var("TEST", 0), Some("1034".into()));
+        assert_eq!(d.get_var("TEST"), Some("1034".into()));
     }
 
     #[test]
@@ -1031,7 +1031,7 @@ mod test {
         d.set_var("OP", "append");
         d.set_var("OVERRIDES", "a:b");
 
-        assert_eq!(d.get_var("TEST", 0), Some("firstOPwhy?".into()));
+        assert_eq!(d.get_var("TEST"), Some("firstOPwhy?".into()));
     }
 
     #[test]
@@ -1048,7 +1048,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c:");
 
-        assert_eq!(d.get_var("TEST", 0), Some("QWHAT!34".into()));
+        assert_eq!(d.get_var("TEST"), Some("QWHAT!34".into()));
     }
 
     #[test]
@@ -1059,7 +1059,7 @@ mod test {
         d.set_var("TEST:append", " 4");
         d.set_var("B", "remove");
 
-        assert_eq!(d.get_var("TEST", 0), Some("1  3 4".into()));
+        assert_eq!(d.get_var("TEST"), Some("1  3 4".into()));
     }
 
     #[test]
@@ -1071,8 +1071,8 @@ mod test {
         d.set_var("W", "Q");
         d.set_var("Q", "remove");
 
-        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:remove");
-        assert_eq!(d.get_var("TEST", 0), Some("1  3".into()));
+        assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:remove");
+        assert_eq!(d.get_var("TEST"), Some("1  3".into()));
     }
 
     #[test]
@@ -1087,8 +1087,8 @@ mod test {
 
         d.set_var("TEST:append", " 5 ");
 
-        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
-        assert_eq!(d.get_var("TEST", 0), Some("1 2 3 5  4 ".into()));
+        assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
+        assert_eq!(d.get_var("TEST"), Some("1 2 3 5  4 ".into()));
     }
 
     #[test]
@@ -1106,8 +1106,8 @@ mod test {
         d.set_var("TEST:b:append", "OK");
         d.set_var("OVERRIDES", "b");
 
-        assert_eq!(d.expand("TEST:${${B}}", 0).unwrap(), "TEST:append");
-        assert_eq!(d.get_var("TEST", 0), Some("OK 5  4 ".into()));
+        assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
+        assert_eq!(d.get_var("TEST"), Some("OK 5  4 ".into()));
     }
 
     #[test]
@@ -1117,7 +1117,7 @@ mod test {
         d.set_var("TEST:${A}", "1");
         d.set_var("TEST:${A}", "2");
         d.set_var("A", "append");
-        assert_eq!(d.get_var("TEST", 0), Some("102".into()));
+        assert_eq!(d.get_var("TEST"), Some("102".into()));
     }
 
     #[test]
@@ -1130,7 +1130,7 @@ mod test {
 
         println!("\n");
         //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-        println!("TEST = {:?}\n", d.get_var("TEST", 0));
+        println!("TEST = {:?}\n", d.get_var("TEST"));
     }
 }
 
@@ -1188,7 +1188,7 @@ fn main() {
 
     // println!("\n");
     // //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("TEST = {:?}\n", d.get_var("TEST", 0));
+    println!("TEST = {:?}\n", d.get_var("TEST"));
     //
     // println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
