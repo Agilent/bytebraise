@@ -228,21 +228,46 @@ struct DataSmart {
 // TODO: need to support more than 64 overrides?
 fn score_override(
     active_overrides: &Option<IndexSet<String>>,
-    candidate_overrides: &IndexSet<String>,
-) -> Option<u64> {
-    let mut ret = 0;
-
+    candidate_overrides: &Vec<String>,
+) -> Option<(u64, usize, usize)> {
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
     let temp_cloned_active_overrides = active_overrides.clone().unwrap_or_default();
-    if !candidate_overrides.is_subset(&temp_cloned_active_overrides) {
+
+    let c: IndexSet<String> = candidate_overrides.iter().cloned().collect();
+    if !c.is_subset(&temp_cloned_active_overrides) {
         return None;
     }
 
+    let mut ret = (0, 0, 0);
+
     if let Some(active_overrides) = active_overrides {
+        let mut candidate = candidate_overrides.clone();
+
         for (i, active_override) in active_overrides.iter().enumerate() {
             if candidate_overrides.contains(active_override) {
-                ret |= 1 << i;
+                ret.0 |= 1 << i;
+            }
+        }
+
+        let mut keep_going = true;
+        while keep_going {
+            keep_going = false;
+            for (ai, active_override) in active_overrides.iter().enumerate() {
+                if candidate.len() == 1 && &candidate[0] == active_override {
+                    //assert_eq!(ret.2, 0);
+                    ret.2 = ai;
+                    break;
+                } else if candidate.len() > 1 && candidate.ends_with(&[active_override.clone()]) {
+                    let old = candidate.clone();
+                    eprintln!("{:?}", candidate);
+                    candidate.retain_with_index(|c, i|
+                        i == 0 || c != active_override
+                    );
+                    assert_ne!(old, candidate);
+                    keep_going = true;
+                    ret.1 += 1;
+                }
             }
         }
     }
@@ -250,43 +275,69 @@ fn score_override(
     Some(ret)
 }
 
-fn split_overrides<S: AsRef<str>>(input: S) -> IndexSet<String> {
+trait RetainWithIndex<T> {
+    fn retain_with_index<F>(&mut self, f: F)
+        where
+            F: FnMut(&T, usize) -> bool;
+}
+
+impl<T> RetainWithIndex<T> for Vec<T> {
+    fn retain_with_index<F>(&mut self, mut f: F)
+        where
+            F: FnMut(&T, usize) -> bool,
+    {
+        let mut i = 0;
+        self.retain(|x| {
+            let should_retain = f(x, i);
+            i += 1; // Increment index on each iteration
+            should_retain
+        });
+    }
+}
+
+
+fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
     split_filter_empty(input.as_ref(), ":")
         .map(String::from)
-        .collect::<IndexSet<String>>()
+        .collect()
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum ResolvedOverridesData {
     Operation {
-        lhs: IndexSet<String>,
+        lhs: Vec<String>,
         rhs: IndexSet<String>,
-        score: u64,
+        score: (u64, usize, usize),
     },
     PureOverride {
-        overrides: IndexSet<String>,
-        score: u64,
+        overrides: Vec<String>,
+        score: (u64, usize, usize),
     },
 }
 
 impl ResolvedOverridesData {
     fn override_filter(&self) -> IndexSet<String> {
         match self {
-            ResolvedOverridesData::Operation { lhs, .. } => lhs.clone(),
-            ResolvedOverridesData::PureOverride { overrides, .. } => overrides.clone(),
+            ResolvedOverridesData::Operation { lhs, .. } => lhs.iter().cloned().collect(),
+            ResolvedOverridesData::PureOverride { overrides, .. } => overrides.iter().cloned().collect(),
         }
     }
 
     fn is_valid_for_filter(&self, override_filter: &IndexSet<String>) -> bool {
-        // This is sensitive to order.
-        // TODO: add example bitbake code to demonstrate
         match self {
             ResolvedOverridesData::Operation { lhs, .. } => {
-                lhs.is_empty() || lhs.as_slice() == override_filter.as_slice()
+                let lhs: IndexSet<String> = lhs.iter().cloned().collect();
+                lhs.is_empty() || lhs == *override_filter
             }
             ResolvedOverridesData::PureOverride { overrides, .. } => {
-                eprintln!("checking {:?} == {:?}", overrides, override_filter);
-                overrides.is_empty() || overrides.as_slice() == override_filter.as_slice()
+                let overrides: IndexSet<String> = overrides.iter().cloned().collect();
+                eprintln!(
+                    "checking {:?} == {:?} ({})",
+                    overrides,
+                    override_filter,
+                    overrides == *override_filter
+                );
+                overrides.is_empty() || overrides == *override_filter
             }
         }
     }
@@ -297,6 +348,7 @@ impl ResolvedOverridesData {
             .map_or(false, |active_overrides| match self {
                 ResolvedOverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
                 ResolvedOverridesData::PureOverride { overrides, .. } => {
+                    let overrides: IndexSet<String> = overrides.iter().cloned().collect();
                     overrides.is_subset(active_overrides)
                 }
             })
@@ -313,9 +365,10 @@ struct ResolvedVariableOperation {
 }
 
 impl ResolvedVariableOperation {
-    fn override_score(&self) -> u64 {
+    fn override_score(&self) -> (u64, usize, usize) {
         match &self.overrides_data {
-            None => 0,
+            // TODO: revisit None?
+            None => (0, 0, 0),
             Some(ResolvedOverridesData::Operation { score, .. }) => *score,
             Some(ResolvedOverridesData::PureOverride { score, .. }) => *score,
         }
@@ -328,22 +381,18 @@ impl ResolvedVariableOperation {
             Some(ResolvedOverridesData::Operation { .. }) => true,
         }
     }
+
+    fn override_lhs(&self) -> Vec<String> {
+        match &self.overrides_data {
+            None => vec![],
+            Some(ResolvedOverridesData::PureOverride { overrides, .. }) => overrides.clone(),
+            Some(ResolvedOverridesData::Operation { lhs, ..  }) => lhs.clone(),
+        }
+    }
 }
 
 impl Ord for ResolvedVariableOperation {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.unexpanded_override == other.unexpanded_override
-            && self.op_type == other.op_type
-            && matches!(
-                self.op_type,
-                VariableOperationKind::SynthesizedAppend
-                    | VariableOperationKind::SynthesizedPrepend
-            )
-        {
-            eprintln!("OK!!!");
-            return Ordering::Equal;
-        }
-
         self.override_score()
             .cmp(&other.override_score())
             .reverse()
@@ -419,7 +468,13 @@ impl DataSmart {
         self.set_var_ex(var, value, StmtKind::WeakDefault, true);
     }
 
-    fn set_var_ex<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S, stmt_kind: StmtKind, check_keyword: bool) {
+    fn set_var_ex<T: Into<String>, S: Into<String>>(
+        &mut self,
+        var: T,
+        value: S,
+        stmt_kind: StmtKind,
+        check_keyword: bool,
+    ) {
         let var = var.into();
         let value = value.into();
 
@@ -554,22 +609,16 @@ impl DataSmart {
 
             for i in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s = split_filter_empty(
-                    &self.get_var("OVERRIDES").unwrap_or_default(),
-                    ":",
-                )
-                .map(String::from)
-                .collect::<IndexSet<String>>();
+                let s = split_filter_empty(&self.get_var("OVERRIDES").unwrap_or_default(), ":")
+                    .map(String::from)
+                    .collect::<IndexSet<String>>();
 
                 //eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(
-                    &self.get_var("OVERRIDES").unwrap_or_default(),
-                    ":",
-                )
-                .map(String::from)
-                .collect::<IndexSet<String>>();
+                let s2 = split_filter_empty(&self.get_var("OVERRIDES").unwrap_or_default(), ":")
+                    .map(String::from)
+                    .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -660,7 +709,7 @@ impl DataSmart {
 
                         resolved_od = Some(ResolvedOverridesData::Operation {
                             lhs: override_lhs,
-                            rhs: split_overrides(override_rhs),
+                            rhs: split_overrides(override_rhs).iter().cloned().collect(),
                             score: override_score,
                         });
                     } else {
@@ -727,27 +776,27 @@ impl DataSmart {
             }
         }
 
-        let mut ret =  match resolved_start_value.op_type {
-            VariableOperationKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.value.clone()),
-            _ => {
-                RetValue::Eager(match resolved_start_value.op_type {
-                    VariableOperationKind::PlusEqual => format!(" {}", resolved_start_value.value),
-                    VariableOperationKind::EqualPlus => format!("{} ", resolved_start_value.value),
-                    _ => resolved_start_value.value.clone(),
-                })
+        let mut ret = match resolved_start_value.op_type {
+            VariableOperationKind::WeakDefault => {
+                RetValue::WeakDefault(resolved_start_value.value.clone())
             }
+            _ => RetValue::Eager(match resolved_start_value.op_type {
+                VariableOperationKind::PlusEqual => format!(" {}", resolved_start_value.value),
+                VariableOperationKind::EqualPlus => format!("{} ", resolved_start_value.value),
+                _ => resolved_start_value.value.clone(),
+            }),
         };
 
-        eprintln!("start value = {:?}", ret);
+        eprintln!("start value = {:?} @ score: {:?} with LHS: {:?}", ret, resolved_start_value.override_score(), resolved_start_value.override_lhs());
         resolved_variable_operations
             .heap
             .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
-        eprintln!("remainder: {:#?}", resolved_variable_operations);
+        eprintln!("before filter: {:#?}", resolved_variable_operations);
 
         // TODO: just filter in loop below
         resolved_variable_operations.heap.retain(|(op, _)| {
             op.override_score() >= resolved_start_value.override_score()
-                || op.is_override_operation()
+                || (op.is_override_operation() && (op.override_lhs() == resolved_start_value.override_lhs() || op.override_lhs().is_empty()))
         });
 
         eprintln!("{:#?}", resolved_variable_operations);
@@ -921,7 +970,8 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
-    use crate::DataSmart;
+    use indexmap::IndexSet;
+    use crate::{DataSmart, score_override};
 
     #[test]
     fn none() {
@@ -1158,6 +1208,195 @@ mod test {
     }
 
     #[test]
+    fn override_priority_order() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a", "2");
+        d.set_var("TEST:b", "3");
+        d.set_var("TEST:b:a", "6");
+        d.set_var("TEST:a:b", "5");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
+
+        let candidate = vec!["a".to_string(), "b".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((3, 2, 0)));
+
+        let candidate = vec!["b".to_string(), "a".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((3, 1, 0)));
+
+        let candidate = vec!["a".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((1, 1, 0)));
+
+        let candidate = vec!["b".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((2, 1, 0)));
+
+        assert_eq!(d.get_var("TEST"), Some("5".into()));
+    }
+
+    #[test]
+    fn override_priority_order_2() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a", "2");
+        d.set_var("TEST:b", "3");
+        d.set_var("TEST:a:b", "5");
+        d.set_var("TEST:b:a", "6");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("5".into()));
+    }
+
+    fn override_priority_order_3() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:c:b:a", "2");
+        d.set_var("TEST:a:b:c", "3");
+        d.set_var("TEST:c:a:b", "4");
+        d.set_var("TEST:b:a:c", "5");
+        d.set_var("TEST:b:c:a", "6");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("3".into()));
+    }
+
+    #[test]
+    fn override_selection_order_sensitivity() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:b:a:append", "2");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn override_selection_order_sensitivity_2() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:b:a:append", "2");
+        d.set_var("TEST:a:b:append", "3");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
+
+        let candidate = vec!["a".to_string(), "b".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((3, 2, 0)));
+
+        let candidate = vec!["b".to_string(), "a".to_string()];
+        let ret = score_override(&Some(active_overrides.clone()), &candidate);
+        assert_eq!(ret, Some((3, 1, 0)));
+
+        assert_eq!(d.get_var("TEST"), Some("3".into()));
+    }
+
+    #[test]
+    fn override_selection_order_sensitivity_3() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b:append", "3");
+        d.set_var("TEST:b:a:append", "2");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("3".into()));
+    }
+
+    #[test]
+    fn override_selection_order_sensitivity_4() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b:append", "3");
+        d.set_var("TEST:b:a:append", "2");
+        d.set_var("TEST:a:b:a:append", "4");
+        d.set_var("OVERRIDES", "a:b:c");
+
+
+        fn score<S: AsRef<str>>(input: S) -> (u64, usize, usize) {
+            let input = input.as_ref();
+            let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
+
+            let candidate: Vec<String> = input.chars().map(String::from).collect();
+            let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
+
+            eprintln!("{} => {:?}", input, ret);
+
+            ret
+        }
+
+        score("ab");
+        score("ba");
+        score("aba");
+
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
+    }
+
+    #[test]
+    fn tricky_1() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:c:b", "2");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn tricky_2() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:c:b:a:b:c", "2");
+        d.set_var("TEST:a:b:c", "3");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b:c", "3");
+        d.set_var("TEST:c:b:a:b:c", "2");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn tricky_3() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b:c", "3");
+        d.set_var("TEST:a:b:c:a", "4");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
+
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b:c:a", "4");
+        d.set_var("TEST:a:b:c", "3");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
+    }
+
+    #[test]
+    fn filter_order_sensitivity() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:append:b:a", "2");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("12".into()));
+    }
+
+    #[test]
     fn order_of_operations() {
         let mut d = DataSmart::new();
         d.set_var("TEST", "1 2 3");
@@ -1308,14 +1547,35 @@ mod test {
         d.weak_default_var("W", "x");
         d.plus_equals_var("W", "y");
         assert_eq!(d.get_var("W"), Some(" y".into()));
+
+        let mut d = DataSmart::new();
+        d.weak_default_var("W", "x");
+        d.set_var("W:append", "y");
+        assert_eq!(d.get_var("W"), Some("xy".into()));
     }
 
     #[test]
     fn weak_default_priority() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "2");
-        d.weak_default_var("TEST", "3");
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        d.weak_default_var("TEST", "2");
+        d.weak_default_var("TEST:a", "3");
+        d.weak_default_var("TEST:a:b", "4");
+        d.weak_default_var("TEST:b", "5");
+
+        d.set_var("OVERRIDES", "a:b");
+        assert_eq!(d.get_var("TEST"), Some("4".into()));
+    }
+
+    #[test]
+    fn weak_default_append() {
+        let mut d = DataSmart::new();
+
+        d.set_var("TEST", "");
+        d.set_var("TEST:append", "wat");
+        d.weak_default_var("TEST:a", "OK");
+        d.set_var("OVERRIDES", "a:b");
+
+        assert_eq!(d.get_var("TEST"), Some("OKwat".into()));
     }
 
     #[test]

@@ -470,39 +470,56 @@ impl DataSmartInner {
 
                 // We may have been called by |needs_overrides| so guard against None
                 if let Some(active_overrides) = &override_state.active_overrides {
+                    println!("!!! active_overrides: {:?}", active_overrides);
                     let mut active_override_to_full_var_map = HashMap::new();
+                    let mut counter: HashMap<String, (u64, usize, usize)> = HashMap::new();
 
                     // Find the subset of variable overrides that are active
                     for entry in var_overrides.iter() {
                         let o = &entry.override_str;
                         if override_state.is_override_active(o) {
                             active_override_to_full_var_map.insert(o.clone(), &entry.full_var);
+                            counter.insert(entry.full_var.clone(), (0, 0, 0));
                         }
                     }
+
+                    println!("{:?}", active_override_to_full_var_map);
 
                     // This loop finds the most specific active override
                     // TODO: possible to come up with a simpler algorithm?
+                    let mut passes = 0;
                     let mut map_was_modified = true;
                     while map_was_modified {
                         map_was_modified = false;
-                        for o in active_overrides {
+                        for (oi, the_override) in active_overrides.iter().enumerate() {
                             for a in active_override_to_full_var_map.clone().keys() {
-                                let suffix = format!("_{}", o);
+                                let the_key = active_override_to_full_var_map[a].clone();
+                                println!("FULL KEY: {}", the_key);
+
+                                let suffix = format!("_{}", the_override);
                                 if a.ends_with(&suffix) {
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
-                                    // Note this is only removing the override once at the end, as
-                                    // opposed to BitBake which just uses |replace|.
+                                    eprintln!(">>> {}", a);
                                     active_override_to_full_var_map
-                                        .insert(a[..a.len() - suffix.len()].to_string(), t);
+                                        .insert(a.replace(&suffix, ""), t);
 
                                     map_was_modified = true;
-                                } else if a == o {
-                                    the_match =
-                                        Some(active_override_to_full_var_map.remove(a).unwrap());
+                                    counter[t].1 += 1;
+                                } else if a == the_override {
+                                    eprintln!("the_override: {}", the_override);
+                                    let t = active_override_to_full_var_map.remove(a).unwrap();
+                                    assert_eq!(counter[t].2, 0);
+                                    counter[t].2 = oi;
+                                    the_match = Some(t);
+
                                 }
                             }
                         }
+                        passes += 1;
                     }
+
+                    eprintln!("{:#?}", counter);
+                    eprintln!("pkey: {}, passes: {}", key, passes);
                 }
             }
 

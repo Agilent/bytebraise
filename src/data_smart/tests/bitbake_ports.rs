@@ -557,6 +557,21 @@ mod overrides {
         );
     });
 
+    ported_datasmart_overrides_test!(remove_with_override2, d, {
+        d.set_var("TEST", "1")?;
+        d.set_var("TEST_a_b", "3")?;
+        d.set_var("TEST_b_a", "2")?;
+        d.set_var("TEST_a_b_a", "4")?;
+
+        d.set_var("OVERRIDES", "a:b:c")?;
+        assert_eq!(
+            d.get_var("TEST")?.ok_or(DataSmartError::UnwrapNoneError)?,
+            "4"
+        );
+
+        panic!();
+    });
+
     ported_datasmart_overrides_test!(append_and_override_1, d, {
         d.set_var("TEST_append", "testvalue2")?;
         d.set_var("TEST_bar", "testvalue3")?;
