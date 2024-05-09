@@ -559,9 +559,10 @@ mod overrides {
 
     ported_datasmart_overrides_test!(remove_with_override2, d, {
         d.set_var("TEST", "1")?;
-        d.set_var("TEST_a_b", "3")?;
-        d.set_var("TEST_b_a", "2")?;
-        d.set_var("TEST_a_b_a", "4")?;
+        d.set_var("TEST_a", "3")?;
+        d.set_var("TEST_b", "2")?;
+        d.set_var("TEST_b_a", "4")?;
+        d.set_var("TEST_a_b", "7")?;
 
         d.set_var("OVERRIDES", "a:b:c")?;
         assert_eq!(

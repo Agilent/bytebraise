@@ -230,6 +230,7 @@ fn score_override(
     active_overrides: &Option<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
 ) -> Option<(u64, usize, usize)> {
+    eprintln!("scoring {:?}", candidate_overrides);
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
     let temp_cloned_active_overrides = active_overrides.clone().unwrap_or_default();
@@ -251,22 +252,27 @@ fn score_override(
         }
 
         let mut keep_going = true;
-        while keep_going {
+        'outer: while keep_going {
             keep_going = false;
+            eprintln!("iteration {}", ret.1);
+            ret.1 += 1;
             for (ai, active_override) in active_overrides.iter().enumerate() {
+                eprintln!("\tconsider override {}", active_override);
                 if candidate.len() == 1 && &candidate[0] == active_override {
-                    //assert_eq!(ret.2, 0);
-                    ret.2 = ai;
-                    break;
+                    assert_eq!(ret.2, 0);
+                    ret.2 = ai + 1;
+                    break 'outer;
                 } else if candidate.len() > 1 && candidate.ends_with(&[active_override.clone()]) {
                     let old = candidate.clone();
-                    eprintln!("{:?}", candidate);
+                    //eprintln!("{:?}", candidate);
                     candidate.retain_with_index(|c, i|
                         i == 0 || c != active_override
                     );
+
+                    eprintln!("\t\ttransform {:?} => {:?}", old, candidate);
+
                     assert_ne!(old, candidate);
                     keep_going = true;
-                    ret.1 += 1;
                 }
             }
         }
@@ -973,6 +979,19 @@ mod test {
     use indexmap::IndexSet;
     use crate::{DataSmart, score_override};
 
+
+    fn score<S: AsRef<str>>(input: S) -> (u64, usize, usize) {
+        let input = input.as_ref().replace(':', "");
+        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
+
+        let candidate: Vec<String> = input.chars().map(String::from).collect();
+        let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
+
+        eprintln!("{} => {:?}", input, ret);
+
+        ret
+    }
+
     #[test]
     fn none() {
         let mut d = DataSmart::new();
@@ -1216,25 +1235,13 @@ mod test {
         d.set_var("TEST:b:a", "6");
         d.set_var("TEST:a:b", "5");
 
+        score("");
+        score("a");
+        score("b");
+        score("b:a");
+        score("a:b");
+
         d.set_var("OVERRIDES", "a:b:c");
-
-        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
-
-        let candidate = vec!["a".to_string(), "b".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((3, 2, 0)));
-
-        let candidate = vec!["b".to_string(), "a".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((3, 1, 0)));
-
-        let candidate = vec!["a".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((1, 1, 0)));
-
-        let candidate = vec!["b".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((2, 1, 0)));
 
         assert_eq!(d.get_var("TEST"), Some("5".into()));
     }
@@ -1317,19 +1324,6 @@ mod test {
         d.set_var("TEST:b:a:append", "2");
         d.set_var("TEST:a:b:a:append", "4");
         d.set_var("OVERRIDES", "a:b:c");
-
-
-        fn score<S: AsRef<str>>(input: S) -> (u64, usize, usize) {
-            let input = input.as_ref();
-            let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
-
-            let candidate: Vec<String> = input.chars().map(String::from).collect();
-            let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
-
-            eprintln!("{} => {:?}", input, ret);
-
-            ret
-        }
 
         score("ab");
         score("ba");

@@ -8,6 +8,7 @@ use std::rc::{Rc, Weak};
 use anyhow::Context;
 use im_rc::HashMap;
 use indexmap::set::IndexSet;
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub use public_interface::DataSmart;
 use regex::{Captures, Regex};
@@ -491,11 +492,14 @@ impl DataSmartInner {
                     let mut map_was_modified = true;
                     while map_was_modified {
                         map_was_modified = false;
+                        for c in active_override_to_full_var_map.values() {
+                            counter[*c].1 += 1;
+                        }
+
                         for (oi, the_override) in active_overrides.iter().enumerate() {
                             for a in active_override_to_full_var_map.clone().keys() {
                                 let the_key = active_override_to_full_var_map[a].clone();
                                 println!("FULL KEY: {}", the_key);
-
                                 let suffix = format!("_{}", the_override);
                                 if a.ends_with(&suffix) {
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
@@ -504,14 +508,12 @@ impl DataSmartInner {
                                         .insert(a.replace(&suffix, ""), t);
 
                                     map_was_modified = true;
-                                    counter[t].1 += 1;
                                 } else if a == the_override {
                                     eprintln!("the_override: {}", the_override);
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
                                     assert_eq!(counter[t].2, 0);
-                                    counter[t].2 = oi;
+                                    counter[t].2 = oi + 1;
                                     the_match = Some(t);
-
                                 }
                             }
                         }
