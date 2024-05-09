@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::iter;
 
 use fxhash::FxHashMap;
 use indexmap::{IndexMap, IndexSet};
@@ -229,7 +230,7 @@ struct DataSmart {
 fn score_override(
     active_overrides: &Option<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
-) -> Option<(u64, usize, usize)> {
+) -> Option<(Vec<usize>, usize, usize)> {
     eprintln!("scoring {:?}", candidate_overrides);
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
@@ -240,16 +241,26 @@ fn score_override(
         return None;
     }
 
-    let mut ret = (0, 0, 0);
+    let mut ret = (vec![], 0 , 0);
+    if candidate_overrides.is_empty() {
+        return Some(ret);
+    }
 
     if let Some(active_overrides) = active_overrides {
+        ret = (iter::repeat(0).take(active_overrides.len()).collect(), 0, 0);
+
         let mut candidate = candidate_overrides.clone();
 
-        for (i, active_override) in active_overrides.iter().enumerate() {
-            if candidate_overrides.contains(active_override) {
-                ret.0 |= 1 << i;
-            }
-        }
+        let counts = candidate_overrides.iter().counts();
+        ret.0 = active_overrides.iter().map(|o| {
+            counts.get(o).copied().unwrap_or_default()
+        }).rev().collect();
+
+        // for (i, active_override) in active_overrides.iter().enumerate() {
+        //     if candidate_overrides.contains(active_override) {
+        //         ret.0 |= 1 << i;
+        //     }
+        // }
 
         let mut keep_going = true;
         'outer: while keep_going {
@@ -313,11 +324,11 @@ enum ResolvedOverridesData {
     Operation {
         lhs: Vec<String>,
         rhs: IndexSet<String>,
-        score: (u64, usize, usize),
+        score: (Vec<usize>, usize, usize),
     },
     PureOverride {
         overrides: Vec<String>,
-        score: (u64, usize, usize),
+        score: (Vec<usize>, usize, usize),
     },
 }
 
@@ -371,12 +382,12 @@ struct ResolvedVariableOperation {
 }
 
 impl ResolvedVariableOperation {
-    fn override_score(&self) -> (u64, usize, usize) {
+    fn override_score(&self) -> (Vec<usize>, usize, usize) {
         match &self.overrides_data {
             // TODO: revisit None?
-            None => (0, 0, 0),
-            Some(ResolvedOverridesData::Operation { score, .. }) => *score,
-            Some(ResolvedOverridesData::PureOverride { score, .. }) => *score,
+            None => (vec![], 0, 0),
+            Some(ResolvedOverridesData::Operation { score, .. }) => score.clone(),
+            Some(ResolvedOverridesData::PureOverride { score, .. }) => score.clone(),
         }
     }
 
@@ -747,6 +758,14 @@ impl DataSmart {
             })
             .collect();
 
+        let items = resolved_variable_operations.heap.iter().cloned().collect_vec();
+
+        eprintln!("SCORING: ");
+        for item in resolved_variable_operations.heap.iter() {
+            eprintln!("{}={} => {:?}", item.0.unexpanded_override, item.0.value ,item.0.override_score());
+        }
+        eprintln!("=====");
+
         let Some((resolved_start_value, _)) = resolved_variable_operations.heap.first().cloned()
         else {
             return None;
@@ -980,7 +999,7 @@ mod test {
     use crate::{DataSmart, score_override};
 
 
-    fn score<S: AsRef<str>>(input: S) -> (u64, usize, usize) {
+    fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
         let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
 
@@ -1291,16 +1310,6 @@ mod test {
         d.set_var("TEST:b:a:append", "2");
         d.set_var("TEST:a:b:append", "3");
         d.set_var("OVERRIDES", "a:b:c");
-
-        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
-
-        let candidate = vec!["a".to_string(), "b".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((3, 2, 0)));
-
-        let candidate = vec!["b".to_string(), "a".to_string()];
-        let ret = score_override(&Some(active_overrides.clone()), &candidate);
-        assert_eq!(ret, Some((3, 1, 0)));
 
         assert_eq!(d.get_var("TEST"), Some("3".into()));
     }

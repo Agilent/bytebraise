@@ -1,6 +1,7 @@
 #![feature(cell_filter_map)]
 #![feature(min_specialization)]
 #![feature(assert_matches)]
+#![feature(is_sorted)]
 
 pub mod ast;
 pub mod build;

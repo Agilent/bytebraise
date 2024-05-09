@@ -491,26 +491,30 @@ impl DataSmartInner {
                     let mut passes = 0;
                     let mut map_was_modified = true;
                     while map_was_modified {
+                        eprintln!("pass {}", passes);
                         map_was_modified = false;
                         for c in active_override_to_full_var_map.values() {
                             counter[*c].1 += 1;
                         }
 
                         for (oi, the_override) in active_overrides.iter().enumerate() {
-                            for a in active_override_to_full_var_map.clone().keys() {
-                                let the_key = active_override_to_full_var_map[a].clone();
-                                println!("FULL KEY: {}", the_key);
+                            eprintln!("\tconsider override: {}", the_override);
+                            let the_clone = active_override_to_full_var_map.clone();
+                            for a in the_clone.keys() {
+                                let the_key = the_clone[a].clone();
                                 let suffix = format!("_{}", the_override);
                                 if a.ends_with(&suffix) {
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
-                                    eprintln!(">>> {}", a);
+                                    println!("\t\tSlicing {} from {} ({})", suffix, a, t);
+                                    eprintln!("\t\t\tRe-inserting   {}", t);
                                     active_override_to_full_var_map
                                         .insert(a.replace(&suffix, ""), t);
 
                                     map_was_modified = true;
                                 } else if a == the_override {
-                                    eprintln!("the_override: {}", the_override);
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
+                                    eprintln!("\t\t\t{}: the_override: {}",t, the_override);
+
                                     assert_eq!(counter[t].2, 0);
                                     counter[t].2 = oi + 1;
                                     the_match = Some(t);
