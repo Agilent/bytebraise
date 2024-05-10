@@ -400,6 +400,13 @@ impl ResolvedVariableOperation {
         }
     }
 
+    fn is_synthesized_operation(&self) -> bool {
+        match self.op_type {
+            VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend => true,
+            _ => false,
+        }
+    }
+
     fn override_lhs(&self) -> Vec<String> {
         match &self.overrides_data {
             None => vec![],
@@ -757,13 +764,14 @@ impl DataSmart {
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
-            .collect();
-
-        let items = resolved_variable_operations
-            .heap
-            .iter()
-            .cloned()
-            .collect_vec();
+            // TODO: something more efficient than a fold?
+            .fold(FifoHeap::new(), |mut a, b| {
+                a.heap.retain(|item| {
+                    !item.0.is_synthesized_operation() || (item.0.unexpanded_override != b.unexpanded_override)
+                });
+                a.push(b);
+                a
+            });
 
         eprintln!("SCORING: ");
         for item in resolved_variable_operations.heap.iter() {
@@ -851,7 +859,7 @@ impl DataSmart {
 
         for (op, _) in &resolved_variable_operations.heap {
             if !op.overrides_data.as_ref().map_or(true, |od| {
-                od.is_active(override_state) && od.is_valid_for_filter(&rhs_filter)
+                od.is_active(override_state) // && od.is_valid_for_filter(&rhs_filter)
             }) {
                 continue;
             }
@@ -1032,6 +1040,16 @@ mod test {
     fn none() {
         let mut d = DataSmart::new();
         assert_eq!(d.get_var("NOT_EXIST"), None);
+    }
+
+    #[test]
+    fn multiple_append() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:append", "2");
+        d.set_var("TEST:append", "2");
+
+        assert_eq!(d.get_var("TEST"), Some("122".into()));
     }
 
     #[test]
@@ -1599,16 +1617,61 @@ mod test {
     }
 
     #[test]
-    fn wat() {
+    fn append_interactions() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST", "a b c");
-        d.set_var("TEST:${A}", "b");
-        d.set_var("A", "remove");
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b", "2");
+        d.set_var("TEST:a:b:a:append", "3");
+        d.plus_equals_var("TEST:a:b:a", "5");
+        d.plus_equals_var("TEST:a:b", "6");
+        d.set_var("OVERRIDES", "a:b");
 
-        println!("\n");
-        //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-        println!("TEST = {:?}\n", d.get_var("TEST"));
+        assert_eq!(d.get_var("TEST"), Some(" 53".into()));
+    }
+
+    #[test]
+    fn more_synthesized_appends() {
+        let mut d = DataSmart::new();
+
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b", "2");
+        d.set_var("TEST:a:b:a:append", "3");
+        d.plus_equals_var("TEST:a:b:a", "5");
+        d.plus_equals_var("TEST:a:b", "6");
+
+        d.set_var("OP", "append");
+        d.set_var("TEST:a:b:${OP}", "Q");
+
+        d.set_var("A", "a");
+        d.set_var("TEST:${A}:b:a:append", "7");
+        d.set_var("TEST:${A}:b:a:append", "7");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some(" 5377".into()));
+    }
+
+    #[test]
+    fn more_synthesized_appends_2() {
+        let mut d = DataSmart::new();
+
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a:b", "2");
+        d.set_var("TEST:a:b:a:append", "3");
+        d.plus_equals_var("TEST:a:b:a", "5");
+        d.plus_equals_var("TEST:a:b", "6");
+
+        d.set_var("OP", "append");
+        d.set_var("TEST:a:b:${OP}", "Q");
+
+        d.set_var("A", "a");
+        d.set_var("TEST:${A}:b:a:${OP}", "7");
+        d.set_var("TEST:${A}:b:a:${OP}", "7");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some(" 537".into()));
     }
 }
 
