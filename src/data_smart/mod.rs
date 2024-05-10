@@ -513,7 +513,7 @@ impl DataSmartInner {
                                     map_was_modified = true;
                                 } else if a == the_override {
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
-                                    eprintln!("\t\t\t{}: the_override: {}",t, the_override);
+                                    eprintln!("\t\t\t{}: the_override: {}", t, the_override);
 
                                     assert_eq!(counter[t].2, 0);
                                     counter[t].2 = oi + 1;

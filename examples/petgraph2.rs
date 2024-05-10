@@ -241,7 +241,7 @@ fn score_override(
         return None;
     }
 
-    let mut ret = (vec![], 0 , 0);
+    let mut ret = (vec![], 0, 0);
     if candidate_overrides.is_empty() {
         return Some(ret);
     }
@@ -252,9 +252,11 @@ fn score_override(
         let mut candidate = candidate_overrides.clone();
 
         let counts = candidate_overrides.iter().counts();
-        ret.0 = active_overrides.iter().map(|o| {
-            counts.get(o).copied().unwrap_or_default()
-        }).rev().collect();
+        ret.0 = active_overrides
+            .iter()
+            .map(|o| counts.get(o).copied().unwrap_or_default())
+            .rev()
+            .collect();
 
         // for (i, active_override) in active_overrides.iter().enumerate() {
         //     if candidate_overrides.contains(active_override) {
@@ -276,9 +278,7 @@ fn score_override(
                 } else if candidate.len() > 1 && candidate.ends_with(&[active_override.clone()]) {
                     let old = candidate.clone();
                     //eprintln!("{:?}", candidate);
-                    candidate.retain_with_index(|c, i|
-                        i == 0 || c != active_override
-                    );
+                    candidate.retain_with_index(|c, i| i == 0 || c != active_override);
 
                     eprintln!("\t\ttransform {:?} => {:?}", old, candidate);
 
@@ -294,14 +294,14 @@ fn score_override(
 
 trait RetainWithIndex<T> {
     fn retain_with_index<F>(&mut self, f: F)
-        where
-            F: FnMut(&T, usize) -> bool;
+    where
+        F: FnMut(&T, usize) -> bool;
 }
 
 impl<T> RetainWithIndex<T> for Vec<T> {
     fn retain_with_index<F>(&mut self, mut f: F)
-        where
-            F: FnMut(&T, usize) -> bool,
+    where
+        F: FnMut(&T, usize) -> bool,
     {
         let mut i = 0;
         self.retain(|x| {
@@ -311,7 +311,6 @@ impl<T> RetainWithIndex<T> for Vec<T> {
         });
     }
 }
-
 
 fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
     split_filter_empty(input.as_ref(), ":")
@@ -336,7 +335,9 @@ impl ResolvedOverridesData {
     fn override_filter(&self) -> IndexSet<String> {
         match self {
             ResolvedOverridesData::Operation { lhs, .. } => lhs.iter().cloned().collect(),
-            ResolvedOverridesData::PureOverride { overrides, .. } => overrides.iter().cloned().collect(),
+            ResolvedOverridesData::PureOverride { overrides, .. } => {
+                overrides.iter().cloned().collect()
+            }
         }
     }
 
@@ -403,7 +404,7 @@ impl ResolvedVariableOperation {
         match &self.overrides_data {
             None => vec![],
             Some(ResolvedOverridesData::PureOverride { overrides, .. }) => overrides.clone(),
-            Some(ResolvedOverridesData::Operation { lhs, ..  }) => lhs.clone(),
+            Some(ResolvedOverridesData::Operation { lhs, .. }) => lhs.clone(),
         }
     }
 }
@@ -758,11 +759,20 @@ impl DataSmart {
             })
             .collect();
 
-        let items = resolved_variable_operations.heap.iter().cloned().collect_vec();
+        let items = resolved_variable_operations
+            .heap
+            .iter()
+            .cloned()
+            .collect_vec();
 
         eprintln!("SCORING: ");
         for item in resolved_variable_operations.heap.iter() {
-            eprintln!("{}={} => {:?}", item.0.unexpanded_override, item.0.value ,item.0.override_score());
+            eprintln!(
+                "{}={} => {:?}",
+                item.0.unexpanded_override,
+                item.0.value,
+                item.0.override_score()
+            );
         }
         eprintln!("=====");
 
@@ -812,7 +822,12 @@ impl DataSmart {
             }),
         };
 
-        eprintln!("start value = {:?} @ score: {:?} with LHS: {:?}", ret, resolved_start_value.override_score(), resolved_start_value.override_lhs());
+        eprintln!(
+            "start value = {:?} @ score: {:?} with LHS: {:?}",
+            ret,
+            resolved_start_value.override_score(),
+            resolved_start_value.override_lhs()
+        );
         resolved_variable_operations
             .heap
             .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
@@ -821,7 +836,9 @@ impl DataSmart {
         // TODO: just filter in loop below
         resolved_variable_operations.heap.retain(|(op, _)| {
             op.override_score() >= resolved_start_value.override_score()
-                || (op.is_override_operation() && (op.override_lhs() == resolved_start_value.override_lhs() || op.override_lhs().is_empty()))
+                || (op.is_override_operation()
+                    && (op.override_lhs() == resolved_start_value.override_lhs()
+                        || op.override_lhs().is_empty()))
         });
 
         eprintln!("{:#?}", resolved_variable_operations);
@@ -995,13 +1012,13 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
+    use crate::{score_override, DataSmart};
     use indexmap::IndexSet;
-    use crate::{DataSmart, score_override};
-
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
-        let active_overrides: IndexSet<String> = vec!["a", "b", "c"].drain(..).map(String::from).collect();
+        let active_overrides: IndexSet<String> =
+            vec!["a", "b", "c"].drain(..).map(String::from).collect();
 
         let candidate: Vec<String> = input.chars().map(String::from).collect();
         let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
