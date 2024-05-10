@@ -44,6 +44,7 @@ pub struct FifoHeap<T> {
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 enum StmtKind {
     WeakDefault,
+    Default,
     Assign,
     PlusEqual,
     EqualPlus,
@@ -75,14 +76,16 @@ impl StmtKind {
             | StmtKind::EqualPlus
             | StmtKind::DotEqual
             | StmtKind::EqualDot => 1,
+            // ?=
+            StmtKind::Default => 2,
             // ??=
-            StmtKind::WeakDefault => 2,
+            StmtKind::WeakDefault => 3,
             // :remove
-            StmtKind::Append => 3,
+            StmtKind::Append => 4,
             // :prepend
-            StmtKind::Prepend => 4,
+            StmtKind::Prepend => 5,
             // :remove
-            StmtKind::Remove => 5,
+            StmtKind::Remove => 6,
         }
     }
 }
@@ -90,6 +93,7 @@ impl StmtKind {
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 enum VariableOperationKind {
     WeakDefault,
+    Default,
     Assign,
     PlusEqual,
     EqualPlus,
@@ -114,6 +118,7 @@ impl From<StmtKind> for VariableOperationKind {
             StmtKind::EqualDot => Self::EqualDot,
             StmtKind::Prepend => Self::Prepend,
             StmtKind::Remove => Self::Remove,
+            StmtKind::Default => Self::Default,
         }
     }
 }
@@ -139,16 +144,18 @@ impl VariableOperationKind {
             | VariableOperationKind::EqualPlus
             | VariableOperationKind::DotEqual
             | VariableOperationKind::EqualDot => 1,
+            // ?=
+            VariableOperationKind::Default => 2,
             // ??=
-            VariableOperationKind::WeakDefault => 2,
+            VariableOperationKind::WeakDefault => 3,
             // :remove
-            VariableOperationKind::Append => 3,
-            VariableOperationKind::SynthesizedAppend => 4,
+            VariableOperationKind::Append => 4,
+            VariableOperationKind::SynthesizedAppend => 5,
             // :prepend
-            VariableOperationKind::Prepend => 5,
-            VariableOperationKind::SynthesizedPrepend => 6,
+            VariableOperationKind::Prepend => 6,
+            VariableOperationKind::SynthesizedPrepend => 7,
             // :remove
-            VariableOperationKind::Remove => 7,
+            VariableOperationKind::Remove => 8,
         }
     }
 }
@@ -493,6 +500,10 @@ impl DataSmart {
         self.set_var_ex(var, value, StmtKind::WeakDefault, true);
     }
 
+    pub fn default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+        self.set_var_ex(var, value, StmtKind::Default, true);
+    }
+
     fn set_var_ex<T: Into<String>, S: Into<String>>(
         &mut self,
         var: T,
@@ -792,6 +803,7 @@ impl DataSmart {
         #[derive(Debug)]
         enum RetValue {
             Eager(String),
+            Default(String),
             WeakDefault(String),
         }
 
@@ -799,6 +811,7 @@ impl DataSmart {
             fn from(value: RetValue) -> Self {
                 match value {
                     RetValue::Eager(s) => s,
+                    RetValue::Default(s) => s,
                     RetValue::WeakDefault(s) => s,
                 }
             }
@@ -808,6 +821,7 @@ impl DataSmart {
             fn as_ref(&self) -> &str {
                 match self {
                     RetValue::Eager(s) => s.as_ref(),
+                    RetValue::Default(s) => s.as_ref(),
                     RetValue::WeakDefault(s) => s.as_ref(),
                 }
             }
@@ -906,7 +920,11 @@ impl DataSmart {
                         ret = RetValue::Eager(format!("{} {}", op.value, ret.as_ref()));
                     }
                 }
-                _ => panic!("unimplemented"),
+                VariableOperationKind::Default => {
+                    if matches!(ret, RetValue::WeakDefault(_)) {
+                        ret = RetValue::Default(op.value.clone())
+                    }
+                }
             }
         }
 
@@ -960,12 +978,6 @@ struct Variable {
     operations: FifoHeap<VariableOperation>,
     cached_value: RefCell<Option<String>>,
     // TODO: iterative cache for OVERRIDES
-}
-
-#[derive(Debug)]
-enum OverrideSpec {
-    Split { lhs: String, rhs: String },
-    Single(String),
 }
 
 #[derive(Debug)]
@@ -1672,6 +1684,43 @@ mod test {
         d.set_var("OVERRIDES", "a:b:c");
 
         assert_eq!(d.get_var("TEST"), Some(" 537".into()));
+    }
+
+    #[test]
+    fn default_var() {
+        let mut d = DataSmart::new();
+
+        d.default_var("TEST", "1");
+
+        assert_eq!(d.get_var("TEST"), Some("1".into()));
+
+        let mut d = DataSmart::new();
+
+        d.default_var("TEST", "1");
+        d.default_var("TEST", "2");
+
+        assert_eq!(d.get_var("TEST"), Some("1".into()));
+    }
+
+    #[test]
+    fn default_precedence() {
+        let mut d = DataSmart::new();
+
+        d.weak_default_var("TEST", "2");
+        d.default_var("TEST", "1");
+
+        assert_eq!(d.get_var("TEST"), Some("1".into()));
+    }
+
+    #[test]
+    fn weak_default_precedence() {
+        let mut d = DataSmart::new();
+
+        d.weak_default_var("TEST:a", "2");
+        d.default_var("TEST", "1");
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(d.get_var("TEST"), Some("2".into()));
     }
 }
 
