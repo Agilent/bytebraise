@@ -30,6 +30,8 @@ paste = "1"
 petgraph = "0.6.4"
 phf = { version = "0.11.1", features = ["macros"] }
 regex = { version = "1", features = ["pattern"] }
+regex-automata = "0.4.6"
+regex-syntax = "0.8.3"
 rowan = "0.15.11"
 scopeguard = "1"
 thiserror = "1"

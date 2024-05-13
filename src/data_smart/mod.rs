@@ -991,6 +991,7 @@ impl DataSmartInner {
 
         Ok(())
     }
+
 }
 
 pub fn expand_keys(data: &DataSmart) -> DataSmartResult<()> {
@@ -1010,7 +1011,7 @@ pub fn expand_keys(data: &DataSmart) -> DataSmartResult<()> {
         {
             if let Some(_val) = data.get_var_opt(key, GetVarOptions::default().expand(false))? {
                 // TODO warn
-                panic!("TODO warning");
+               // panic!("TODO warning");
             }
         }
         data.rename_var(key, expanded_key)?;

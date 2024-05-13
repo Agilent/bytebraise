@@ -597,6 +597,24 @@ mod overrides {
         );
     });
 
+    ported_datasmart_overrides_test!(finalize, d, {
+        d.set_var("TEST${A}", "1")?;
+        d.set_var("A", "2")?;
+        d.set_var("TEST2", "3")?;
+
+        d.expand_keys()?;
+
+        d.set_var("A", "3");
+
+        d.set_var("TEST3", "P");
+        d.expand_keys()?;
+
+        assert_eq!(
+            d.get_var("TEST2")?.ok_or(DataSmartError::UnwrapNoneError)?,
+            "1"
+        );
+    });
+
     ported_datasmart_overrides_test!(underscore_override_2, d, {
         d.set_var("TARGET_ARCH", "x86_64")?;
         d.set_var("PN", "test-${TARGET_ARCH}")?;

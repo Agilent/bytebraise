@@ -228,6 +228,7 @@ struct OverrideState {}
 struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
+    unexpanded_vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
@@ -443,6 +444,7 @@ impl DataSmart {
         DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
+            unexpanded_vars: FxHashMap::default(),
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
@@ -544,6 +546,10 @@ impl DataSmart {
             op_type: stmt_kind,
             idx: stmt_idx,
         });
+
+        if base.contains("${") {
+            self.unexpanded_vars.insert(base.to_string(), *var_entry);
+        }
 
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
@@ -670,6 +676,9 @@ impl DataSmart {
     pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
         let var = var.as_ref();
 
+        let var_parts = var.split_once(':');
+
+
         // TODO: handle override syntax, e.g. getVar("A:pn-waves")
         let var_entry = self.vars.get(var)?;
         //println!("{}get_var = {}", " ".repeat(level), var);
@@ -783,6 +792,8 @@ impl DataSmart {
                 a.push(b);
                 a
             });
+
+        eprintln!("{:#?}", resolved_variable_operations);
 
         eprintln!("SCORING: ");
         for item in resolved_variable_operations.heap.iter() {
@@ -992,6 +1003,11 @@ struct StmtNode {
 }
 
 #[derive(Debug)]
+struct UnexpandedStatementNode {
+
+}
+
+#[derive(Debug)]
 enum GraphItem {
     Variable(Variable),
     StmtNode(StmtNode),
@@ -1034,6 +1050,11 @@ impl GraphItem {
 mod test {
     use crate::{score_override, DataSmart};
     use indexmap::IndexSet;
+    use regex_automata::dfa::onepass::DFA;
+    use regex_automata::dfa::regex::Regex;
+    use regex_automata::Match;
+    use regex_automata::nfa::thompson::NFA;
+    use regex_automata::nfa::thompson::pikevm::PikeVM;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
@@ -1721,6 +1742,28 @@ mod test {
         d.set_var("OVERRIDES", "a:b:c");
 
         assert_eq!(d.get_var("TEST"), Some("2".into()));
+    }
+
+    #[test]
+    fn finalization() {
+        let mut d = DataSmart::new();
+
+        d.set_var("A${B}", "X");
+        d.set_var("B", "2");
+        d.set_var("A2", "Y");
+
+        assert_eq!(d.get_var("A2"), Some("X".into()));
+    }
+
+    #[test]
+    fn key_expansion() {
+        let mut d = DataSmart::new();
+
+        d.set_var("TEST${A}", "1");
+        d.set_var("TEST2", "2");
+        d.set_var("A", "2");
+
+        assert_eq!(d.get_var("TEST2"), Some("1".into()));
     }
 }
 
