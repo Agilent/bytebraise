@@ -200,7 +200,7 @@ fn evaluate_assignment_expression(
         | SyntaxKind::DotEquals
         | SyntaxKind::ColonEquals => {
             let current_value = _get_func(data, key.as_str(), varflag_text.as_deref())
-                .with_context(|| format!("failure getting value for {}", key))?;
+                .with_context(|| format!("failure getting value for {key}"))?;
 
             match expr.op().syntax().kind() {
                 SyntaxKind::DefaultEquals => {
@@ -212,7 +212,7 @@ fn evaluate_assignment_expression(
                 SyntaxKind::ColonEquals => {
                     let e = data.create_copy();
                     new_value = e
-                        .expand_with_varname(assigned_value.as_str(), format!("{}[:=]", key))
+                        .expand_with_varname(assigned_value.as_str(), format!("{key}[:=]"))
                         .with_context(|| format!("error expanding {}", &assigned_value))?
                         .unwrap()
                         .into();
@@ -320,6 +320,6 @@ pub fn inherit<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartResult<()> {
     }
 
     // TODO: inherit cache
-    eprintln!("{:?}", file);
+    eprintln!("{file:?}");
     parse_config_file(file, d)
 }

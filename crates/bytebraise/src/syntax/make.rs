@@ -26,12 +26,12 @@ pub fn ast_from_text<N: AstNode>(text: &str) -> N {
 }
 
 pub fn assignment(var: String, op: String, value: String) -> Assignment {
-    ast_from_text::<Assignment>(&format!("{} {} {}", var, op, value)).clone_for_update()
+    ast_from_text::<Assignment>(&format!("{var} {op} {value}")).clone_for_update()
 }
 
 pub fn quoted_value(text: String) -> QuotedValue {
     // TODO: quote character
-    let input = format!("A = \"{}\"", text);
+    let input = format!("A = \"{text}\"");
     let assignment: Assignment = ast_from_text(&input);
     assignment.clone_for_update().right()
 }
@@ -44,7 +44,7 @@ pub fn quoted_value_from_slice(vals: &[String]) -> QuotedValue {
         _ => {
             let text = format!(
                 " \\\n{} \\\n",
-                vals.iter().map(|v| format!("    {}", v)).join(" \\\n")
+                vals.iter().map(|v| format!("    {v}")).join(" \\\n")
             );
             quoted_value(text)
         }

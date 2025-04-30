@@ -80,7 +80,7 @@ macro_rules! assert_tokenizes_as {
             let mut start = 0;
             let mut lexed_tokens = vec![];
             for token in $crate::lexer::tokenize($input) {
-                lexed_tokens.push(crate::lexer::tests::TokenMock {
+                lexed_tokens.push($crate::lexer::tests::TokenMock {
                     kind: token.kind,
                     len: token.len,
                     text: std::borrow::Cow::Borrowed(&$input[start..start + token.len])
@@ -94,35 +94,35 @@ macro_rules! assert_tokenizes_as {
 
 #[cfg(test)]
 impl TokenMock<'static> {
-    pub fn comment(comment: &'static str) -> TokenMock {
+    pub fn comment(comment: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::Comment,
             text: Cow::Borrowed(comment),
             len: comment.len(),
         }
     }
-    pub fn identifier(comment: &'static str) -> TokenMock {
+    pub fn identifier(comment: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::Identifier,
             text: Cow::Borrowed(comment),
             len: comment.len(),
         }
     }
-    pub fn unquoted(text: &'static str) -> TokenMock {
+    pub fn unquoted(text: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::UnquotedValue,
             text: Cow::Borrowed(text),
             len: text.len(),
         }
     }
-    pub fn directive_arg(arg: &'static str) -> TokenMock {
+    pub fn directive_arg(arg: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::DirectiveArgument,
             text: Cow::Borrowed(arg),
             len: arg.len(),
         }
     }
-    pub fn task(task: &'static str) -> TokenMock {
+    pub fn task(task: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::Task,
             text: Cow::Borrowed(task),
@@ -139,7 +139,7 @@ impl TokenMock<'static> {
     pub fn varflag(varflag: &'static str) -> TokenMock<'static> {
         TokenMock {
             kind: TokenKind::Varflag,
-            text: Cow::Owned(format!("[{}]", varflag)),
+            text: Cow::Owned(format!("[{varflag}]")),
             len: varflag.len() + 2,
         }
     }
@@ -170,7 +170,7 @@ impl TokenMock<'static> {
         TokenMock {
             kind: TokenKind::DoubleQuotedValue,
             len: input.len() + 2,
-            text: Cow::Owned(format!("\"{}\"", input)),
+            text: Cow::Owned(format!("\"{input}\"")),
         }
     }
 
@@ -178,7 +178,7 @@ impl TokenMock<'static> {
         TokenMock {
             kind: TokenKind::SingleQuotedValue,
             len: input.len() + 2,
-            text: Cow::Owned(format!("'{}'", input)),
+            text: Cow::Owned(format!("'{input}'")),
         }
     }
 }

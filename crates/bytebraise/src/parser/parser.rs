@@ -317,7 +317,7 @@ fn print(indent: usize, element: SyntaxElement) {
     print!("{:indent$}", "", indent = indent);
     match element {
         NodeOrToken::Node(node) => {
-            println!("- {:?}", kind);
+            println!("- {kind:?}");
             for child in node.children_with_tokens() {
                 print(indent + 2, child);
             }
@@ -325,6 +325,24 @@ fn print(indent: usize, element: SyntaxElement) {
 
         NodeOrToken::Token(token) => println!("- {:?} {:?}", token.text(), kind),
     }
+}
+
+// TODO error messages
+pub fn parse_bitbake_from_str(input: &str) -> Root {
+    let mut start = 0;
+    let tokens = tokenize(input).into_iter().map(|token| {
+        let text = &input[start..start + token.len];
+        start += token.len;
+        (syntax_kind_for_token_kind(token.kind), text)
+    });
+
+    let ast = Parser {
+        builder: GreenNodeBuilder::new(),
+        iter: tokens.peekable(),
+    }
+    .parse();
+
+    Root::cast(ast).unwrap()
 }
 
 #[cfg(test)]
@@ -387,22 +405,4 @@ deltask do_configure do_fetch
             println!("{:?}", i.syntax().text());
         }
     }
-}
-
-// TODO error messages
-pub fn parse_bitbake_from_str(input: &str) -> Root {
-    let mut start = 0;
-    let tokens = tokenize(input).into_iter().map(|token| {
-        let text = &input[start..start + token.len];
-        start += token.len;
-        (syntax_kind_for_token_kind(token.kind), text)
-    });
-
-    let ast = Parser {
-        builder: GreenNodeBuilder::new(),
-        iter: tokens.peekable(),
-    }
-    .parse();
-
-    Root::cast(ast).unwrap()
 }

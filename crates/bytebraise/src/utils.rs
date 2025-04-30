@@ -32,9 +32,7 @@ pub fn which<P: AsRef<str>, I: AsRef<Path>>(
                 return true;
             }
             false
-        })
-        .map(PathBuf::from)
-        .map(|path| path.canonicalize().unwrap());
+        }).map(|path| path.canonicalize().unwrap());
 
     Ok(ret)
 }

@@ -241,7 +241,7 @@ impl DataSmartInner {
 
     pub fn expand_varref<V: AsRef<str>>(&self, variable: V) -> DataSmartResult<()> {
         let variable = variable.as_ref();
-        let needle = format!("${{{}}}", variable);
+        let needle = format!("${{{variable}}}");
         // TODO: is unwrap ok?
         let value = self
             .get_var_opt(variable, GetVarOptions::default().expand(false))?
@@ -251,7 +251,7 @@ impl DataSmartInner {
         for key in self._klist() {
             if let Some(referrervalue) = self
                 .get_var_opt(&key, GetVarOptions::default().expand(false))
-                .with_context(|| format!("expand_varref: {}", variable))?
+                .with_context(|| format!("expand_varref: {variable}"))?
             {
                 let referrervalue = referrervalue.as_string();
                 if referrervalue.contains(&needle) {
@@ -345,7 +345,7 @@ impl DataSmartInner {
     ) -> DataSmartResult<Option<String>> {
         self.expand_with_refs(Some(s.to_string()), varname)
             .map(|v| v.value)
-            .with_context(|| format!("unable to expand: {}", s))
+            .with_context(|| format!("unable to expand: {s}"))
     }
 
     pub fn get_var_opt(
@@ -354,12 +354,12 @@ impl DataSmartInner {
         options: GetVarOptions,
     ) -> DataSmartResult<Option<VariableContents>> {
         self.get_var_flag_contents(var, CONTENT_FLAG, options)
-            .with_context(|| format!("get_var_opt {}, {:?}", var, options))
+            .with_context(|| format!("get_var_opt {var}, {options:?}"))
     }
 
     pub fn get_var(&self, var: &str) -> DataSmartResult<Option<VariableContents>> {
         self.get_var_opt(var, GetVarOptions::default())
-            .with_context(|| format!("get_var {}", var))
+            .with_context(|| format!("get_var {var}"))
     }
 
     pub fn get_var_flag_with_parser(
@@ -416,10 +416,10 @@ impl DataSmartInner {
         let ret = var_flags
             .into_iter()
             .map(|(flag, data)| {
-                if expand.as_ref().map_or(false, |set| set.contains(&flag)) {
+                if expand.as_ref().is_some_and(|set| set.contains(&flag)) {
                     // TODO: don't unwrap
                     let expanded = self
-                        .expand(&flag, Some(format!("[{}]", flag)))
+                        .expand(&flag, Some(format!("[{flag}]")))
                         .unwrap()
                         .unwrap();
                     (flag, expanded.into())
@@ -448,7 +448,7 @@ impl DataSmartInner {
         let cache_name = if flag == CONTENT_FLAG {
             Cow::Borrowed(key)
         } else {
-            Cow::Owned(format!("{}[{}]", key, flag))
+            Cow::Owned(format!("{key}[{flag}]"))
         };
 
         let var_overrides = RefCell::borrow(&self.per_var_override_data)
@@ -486,7 +486,7 @@ impl DataSmartInner {
                         map_was_modified = false;
                         for o in active_overrides {
                             for a in active_override_to_full_var_map.clone().keys() {
-                                let suffix = format!("_{}", o);
+                                let suffix = format!("_{o}");
                                 if a.ends_with(&suffix) {
                                     let t = active_override_to_full_var_map.remove(a).unwrap();
                                     // Note this is only removing the override once at the end, as
@@ -691,7 +691,7 @@ impl DataSmartInner {
 
         let val = self
             .get_var_opt(var, GetVarOptions::default().expand(false).parsing(true))
-            .with_context(|| format!("rename_var: {}", var))?;
+            .with_context(|| format!("rename_var: {var}"))?;
         if let Some(val) = &val {
             // TODO var history
             println!("set {}", &new_key);

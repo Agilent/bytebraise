@@ -24,5 +24,5 @@ fn main() {
 
     let d = DataSmart::new();
     parsed.evaluate(&d).unwrap();
-    println!("{:?}", d);
+    println!("{d:?}");
 }

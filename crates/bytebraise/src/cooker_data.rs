@@ -62,6 +62,12 @@ pub struct CookerDataBuilder {
     data: DataSmart,
 }
 
+impl Default for CookerDataBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CookerDataBuilder {
     pub fn new() -> Self {
         // TODO BB_ORIGENV, worker vs server context, multiconfigs
@@ -153,7 +159,7 @@ impl CookerDataBuilder {
             .as_string_or_empty()
             .split_whitespace()
         {
-            inherit(bbclass, &data).with_context(|| format!("unable to inherit {}", bbclass))?;
+            inherit(bbclass, &data).with_context(|| format!("unable to inherit {bbclass}"))?;
         }
 
         Ok(data)
