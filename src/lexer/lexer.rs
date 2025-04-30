@@ -89,7 +89,7 @@ fn is_bitbake_identifier_char(c: char) -> bool {
     // a-zA-Z0-9\-_+.${}/~
     is_bitbake_first_identifier_char(c)
         || match c {
-            '-' | '+' | '.' | '$' | '{' | '}' | '/' | '~' => true,
+            '-' | '+' | '.' | '$' | '{' | '}' | '/' | '~' | ':' => true,
             _ => false,
         }
 }
