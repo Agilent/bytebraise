@@ -1,5 +1,4 @@
 use crate::data_smart::DataSmart;
-use crate::ByteBraiseResult;
 
 const BBTASKS: &str = "__BBTASKS";
 
@@ -8,7 +7,7 @@ pub fn add_task<T>(
     _before: Vec<String>,
     _after: Vec<String>,
     d: &DataSmart,
-) -> ByteBraiseResult<()>
+) -> anyhow::Result<()>
 where
     T: ToString,
 {

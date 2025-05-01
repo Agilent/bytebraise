@@ -5,11 +5,10 @@ use std::path::PathBuf;
 use crate::data_smart::variable_contents::VariableContentsAccessors;
 use crate::data_smart::DataSmart;
 use crate::utils::{approved_variables, which};
-use crate::ByteBraiseResult;
 use crate::evaluate::{inherit, parse_config_file};
 
 // TODO: allow passing in BBPATH from yb env
-pub fn find_top_dir() -> ByteBraiseResult<Option<PathBuf>> {
+pub fn find_top_dir() -> anyhow::Result<Option<PathBuf>> {
     let d = DataSmart::new();
     let bbpath = match std::env::var("BBPATH") {
         Ok(val) => {
@@ -40,7 +39,7 @@ pub fn find_top_dir() -> ByteBraiseResult<Option<PathBuf>> {
 pub fn find_config_file(
     config_file_name: &str,
     d: &DataSmart,
-) -> ByteBraiseResult<Option<PathBuf>> {
+) -> anyhow::Result<Option<PathBuf>> {
     let bbpath = d.get_var("BBPATH")?.as_string_or_empty();
     let bbpath_entries = bbpath.split(':').map(PathBuf::from);
 
@@ -77,7 +76,7 @@ impl CookerDataBuilder {
         }
     }
 
-    pub fn parse_base_configuration(&self) -> ByteBraiseResult<()> {
+    pub fn parse_base_configuration(&self) -> anyhow::Result<()> {
         self.parse_configuration_files()?;
 
         //let valid: VariableContents = self.data.get_var("BB_INVALIDCONF")?.unwrap();
@@ -86,7 +85,7 @@ impl CookerDataBuilder {
         Ok(())
     }
 
-    pub fn parse_configuration_files(&self) -> ByteBraiseResult<DataSmart> {
+    pub fn parse_configuration_files(&self) -> anyhow::Result<DataSmart> {
         let data = self.data.create_copy();
 
         // TODO multiconfig

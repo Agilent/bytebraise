@@ -10,5 +10,7 @@ thiserror = "2"
 cow-utils = "0.1.3"
 nested_intervals = "0.6.0"
 derive_builder = "0.20.2"
+anyhow = "1"
+maplit = "1"
 
 bytebraise-lexer = {path = "../bytebraise-lexer"}

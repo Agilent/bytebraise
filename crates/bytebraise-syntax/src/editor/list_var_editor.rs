@@ -1,9 +1,8 @@
-use bytebraise_syntax::parser::parse_bitbake_from_str;
-use bytebraise_syntax::syntax::ast::nodes::Root;
-use bytebraise_syntax::syntax::ast::{AstNode, AstToken};
-use bytebraise_syntax::syntax::ted::Position;
-use bytebraise_syntax::syntax::{make, ted};
-use crate::ByteBraiseResult;
+use crate::parser::parse_bitbake_from_str;
+use crate::syntax::ast::nodes::Root;
+use crate::syntax::ast::{AstNode, AstToken};
+use crate::syntax::ted::Position;
+use crate::syntax::{make, ted};
 use anyhow::Context;
 use maplit::hashset;
 use std::collections::HashSet;
@@ -31,7 +30,7 @@ pub struct ListVarEditor {
 }
 
 impl ListVarEditor {
-    pub fn from_file<P: AsRef<Path>>(path: P, var: String) -> ByteBraiseResult<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P, var: String) -> anyhow::Result<Self> {
         let path = path.as_ref();
 
         let mut source = String::new();
@@ -68,7 +67,7 @@ impl ListVarEditor {
         })
     }
 
-    pub fn commit(&mut self) -> ByteBraiseResult<()> {
+    pub fn commit(&mut self) -> anyhow::Result<()> {
         let assignments = self
             .root
             .identifier_assignments(&self.var)
