@@ -7,6 +7,8 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-lexer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-parser/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

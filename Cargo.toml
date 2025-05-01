@@ -1,4 +1,5 @@
 [workspace]
 members = [
-    "crates/bytebraise"
+    "crates/bytebraise",
+    "crates/bytebraise-lexer"
 ]

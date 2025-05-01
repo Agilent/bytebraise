@@ -2,9 +2,9 @@ use thiserror::Error;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Token {
-    pub(crate) kind: TokenKind,
+    pub kind: TokenKind,
     /// Byte length of token
-    pub(crate) len: usize,
+    pub len: usize,
 }
 
 impl Token {
@@ -156,7 +156,7 @@ impl TokenKind {
     }
 }
 
-pub fn make_fixed_str_token(kind: crate::lexer::token::TokenKind) -> Token {
+pub fn make_fixed_str_token(kind: TokenKind) -> Token {
     Token {
         kind,
         len: kind.get_fixed_str().unwrap().len(),

@@ -1,8 +1,7 @@
 use std::iter::Peekable;
 
-use crate::lexer::tokenize;
 use rowan::{Checkpoint, GreenNodeBuilder, NodeOrToken};
-
+use bytebraise_lexer::lexer::tokenize;
 use crate::syntax::ast::nodes::Root;
 use crate::syntax::ast::{AstNode, AstToken};
 use crate::syntax::syntax_kind::{syntax_kind_for_token_kind, SyntaxKind};

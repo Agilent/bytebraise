@@ -1,4 +1,4 @@
-use crate::lexer::token::TokenKind;
+use bytebraise_lexer::token::TokenKind;
 
 pub fn syntax_kind_for_token_kind(token_kind: TokenKind) -> SyntaxKind {
     match token_kind {

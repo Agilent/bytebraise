@@ -5,7 +5,6 @@ pub mod build;
 pub mod cooker_data;
 pub mod data_smart;
 pub mod editor;
-pub mod lexer;
 pub mod parser;
 pub mod python;
 pub mod split_var_value;

@@ -4,7 +4,7 @@ use muncher::Muncher;
 use phf::{self, phf_map};
 use pretty_assertions::assert_eq;
 
-use crate::lexer::token::{LexerError, LexerErrorKind, Token, TokenKind};
+use crate::token::{LexerError, LexerErrorKind, Token, TokenKind};
 
 pub type Span = core::ops::Range<usize>;
 
