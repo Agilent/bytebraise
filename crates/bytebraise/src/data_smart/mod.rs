@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::{BTreeSet, HashSet};
 use std::convert::{TryFrom, TryInto};
@@ -211,12 +211,12 @@ impl DataSmartInner {
     }
 
     fn _klist(&self) -> HashSet<String> {
-        let klist = RefCell::borrow(&self.data)
+        
+
+        RefCell::borrow(&self.data)
             .keys()
             .cloned()
-            .collect::<HashSet<_>>();
-
-        klist
+            .collect::<HashSet<_>>()
     }
 
     pub fn keys(&self) -> DataSmartResult<Vec<String>> {

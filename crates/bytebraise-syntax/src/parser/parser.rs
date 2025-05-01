@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::syntax::ast::nodes::Root;
-use crate::syntax::ast::{AstNode, AstToken};
+use crate::syntax::ast::AstNode;
 use crate::syntax::syntax_kind::{SyntaxKind, syntax_kind_for_token_kind};
 use crate::syntax::syntax_node::{SyntaxElement, SyntaxNode};
 use bytebraise_lexer::lexer::tokenize;
@@ -246,7 +246,7 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
                 }
                 Some(SyntaxKind::EscapedNewline) => self.bump(),
                 Some(SyntaxKind::Newline) => break,
-                Some(other) => panic!("unexpected token: {:?}", other),
+                Some(other) => panic!("unexpected token: {other:?}"),
             }
         }
         self.builder.finish_node();
@@ -293,7 +293,7 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
                 SyntaxKind::DelTask => self.parse_del_task_node(),
                 SyntaxKind::AddHandler => self.parse_add_handler_node(),
 
-                _ => panic!("{:?}", token),
+                _ => panic!("{token:?}"),
             },
 
             None => return false,

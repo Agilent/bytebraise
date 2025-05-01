@@ -107,8 +107,7 @@ impl CookerDataBuilder {
                 .collect::<Vec<_>>();
             assert!(
                 broken_layers.is_empty(),
-                "these layers don't exist: {:?}",
-                broken_layers
+                "these layers don't exist: {broken_layers:?}"
             );
 
             let approved_variables = approved_variables();
