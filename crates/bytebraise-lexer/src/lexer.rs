@@ -399,6 +399,7 @@ enum LexingPythonDefSubState {
 }
 
 pub struct BitbakeLexer<'input> {
+    #[allow(unused)]
     input: &'input str,
     muncher: Muncher<'input>,
     pub(crate) token: Token,
