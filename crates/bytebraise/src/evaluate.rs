@@ -2,12 +2,12 @@ use crate::build;
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::{DataSmart, GetVarOptions};
-use crate::parser::parser::parse_bitbake_from_str;
+use bytebraise_syntax::parser::parser::parse_bitbake_from_str;
 #[cfg(feature = "python")]
 use crate::python::method_pool::compile_function;
-use crate::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem, Task};
-use crate::syntax::ast::AstToken;
-use crate::syntax::syntax_kind::SyntaxKind;
+use bytebraise_syntax::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem, Task};
+use bytebraise_syntax::syntax::ast::{AstNode, AstToken};
+use bytebraise_syntax::syntax::syntax_kind::SyntaxKind;
 use anyhow::Context;
 use std::fs::File;
 use std::io::Read;
@@ -69,7 +69,7 @@ impl Evaluate for Task {
         }
 
         d.set_var_flag(&funcname, "func", "1")?;
-        let body = self.body().syntax.text().to_string();
+        let body = self.body().syntax().text().to_string();
         d.set_var_opt(&funcname, body, true)?;
         Ok(())
     }
@@ -77,8 +77,8 @@ impl Evaluate for Task {
 
 impl Evaluate for PythonDef {
     fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
-        let function = self.function_name().syntax.to_string();
-        let body = self.syntax.text().to_string();
+        let function = self.function_name().syntax().to_string();
+        let body = self.syntax().text().to_string();
 
         #[cfg(feature = "python")]
         compile_function(&function, &body)?;
@@ -104,7 +104,7 @@ impl Evaluate for Directive {
 
                     let var = var.identifier();
                     // TODO: int 1, not string "1"
-                    d.set_var_flag(var.syntax.text().to_string(), "export", "1")?;
+                    d.set_var_flag(var.syntax().text().to_string(), "export", "1")?;
                     Ok(())
                 }
             }
@@ -133,7 +133,7 @@ impl Evaluate for Directive {
             }
             Directive::AddTask(a) => {
                 build::add_task(
-                    a.task_name().syntax.text(),
+                    a.task_name().syntax().text(),
                     a.before_names(),
                     a.after_names(),
                     d,
@@ -159,7 +159,7 @@ fn evaluate_assignment_expression(
     is_exported: bool,
 ) -> DataSmartResult<()> {
     let ident = expr.left();
-    let key = ident.identifier().syntax.text().to_string();
+    let key = ident.identifier().syntax().text().to_string();
     let mut varflag_text = ident.varflag().map(|v| v.value().to_string());
     let assigned_value = expr.right().value().to_string();
 

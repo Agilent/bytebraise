@@ -6,7 +6,6 @@ use std::marker::PhantomData;
 
 use crate::syntax::syntax_node::{SyntaxNode, SyntaxNodeChildren, SyntaxToken};
 
-pub mod evaluate;
 pub mod nodes;
 pub mod quoted_value;
 pub mod tokens;

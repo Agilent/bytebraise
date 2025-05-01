@@ -1,8 +1,8 @@
-use crate::parser::parse_bitbake_from_str;
-use crate::syntax::ast::nodes::Root;
-use crate::syntax::ast::{AstNode, AstToken};
-use crate::syntax::ted::Position;
-use crate::syntax::{make, ted};
+use bytebraise_syntax::parser::parse_bitbake_from_str;
+use bytebraise_syntax::syntax::ast::nodes::Root;
+use bytebraise_syntax::syntax::ast::{AstNode, AstToken};
+use bytebraise_syntax::syntax::ted::Position;
+use bytebraise_syntax::syntax::{make, ted};
 use crate::ByteBraiseResult;
 use anyhow::Context;
 use maplit::hashset;

@@ -2,4 +2,4 @@
 members = [
     "crates/bytebraise",
     "crates/bytebraise-lexer"
-]
+, "crates/bytebraise-syntax"]

@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use crate::data_smart::variable_contents::VariableContentsAccessors;
 use crate::data_smart::DataSmart;
-use crate::syntax::ast::evaluate::{inherit, parse_config_file};
 use crate::utils::{approved_variables, which};
 use crate::ByteBraiseResult;
+use crate::evaluate::{inherit, parse_config_file};
 
 // TODO: allow passing in BBPATH from yb env
 pub fn find_top_dir() -> ByteBraiseResult<Option<PathBuf>> {
@@ -148,7 +148,7 @@ impl CookerDataBuilder {
 
         //panic!("bbpath: {:?}", data.get_var("BBPATH")?);
         //panic!("{:?}", data.get_var("COREBASE")?);
-        parse_config_file(PathBuf::from("conf").join("bitbake.conf"), &data);
+        parse_config_file(PathBuf::from("conf").join("bitbake.conf"), &data)?;
 
         // TODO: post-files
 
