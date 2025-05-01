@@ -13,4 +13,4 @@ derive_builder = "0.20.2"
 anyhow = "1"
 maplit = "1"
 
-bytebraise-lexer = {path = "../bytebraise-lexer"}
+bytebraise-lexer = { path = "../bytebraise-lexer", version = "0.1.0" }

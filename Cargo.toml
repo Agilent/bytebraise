@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "crates/bytebraise",
-    "crates/bytebraise-lexer"
-, "crates/bytebraise-syntax"]
+    "crates/bytebraise-lexer",
+    "crates/bytebraise-syntax"
+]
