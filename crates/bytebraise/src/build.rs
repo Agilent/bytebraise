@@ -16,7 +16,7 @@ where
         task = "do_".to_string() + &task;
     }
 
-    d.set_var_flag(task, "task", "1");
+    d.set_var_flag(task, "task", "1")?;
     //
     // let bbtasks: BTreeSet<VariableContents> = d
     //     .get_var_opt(BBTASKS, GetVarOptions::default().expand(false))?

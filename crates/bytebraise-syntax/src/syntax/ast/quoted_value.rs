@@ -80,7 +80,7 @@ impl QuotedValue {
         let vals = self
             .lines()
             .filter_map(|v| match v.trim() {
-                v if v.is_empty() => None,
+                "" => None,
                 v => Some(v.to_owned()),
             })
             .sorted()
@@ -129,7 +129,7 @@ impl QuotedValue {
 
         // Invert the set to produce a set of relative ranges of the unescaped content, then
         // transform them to be absolute ranges
-        let ret = interval
+        interval
             .invert(
                 u32::from(relative_range.start()),
                 u32::from(relative_range.end()),
@@ -141,8 +141,7 @@ impl QuotedValue {
                     TextSize::from(range.end) + start_offset,
                 )
             })
-            .collect::<Vec<_>>();
-        ret
+            .collect::<Vec<_>>()
     }
 }
 
