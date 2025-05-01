@@ -3,6 +3,11 @@ name = "bytebraise-lexer"
 version = "0.1.0"
 edition = "2024"
 
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
 [dependencies]
 muncher = "0.7.0"
 phf = { version = "0.11.3", features = ["macros"] }

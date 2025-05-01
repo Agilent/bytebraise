@@ -4,3 +4,11 @@ members = [
     "crates/bytebraise-lexer",
     "crates/bytebraise-syntax"
 ]
+
+exclude = [ "/.idea" ]
+
+[workspace.package]
+homepage = "https://github.com/Agilent/bytebraise"
+repository = "https://github.com/Agilent/bytebraise"
+authors = ["Chris Laplante <chris.laplante@agilent.com>"]
+license = "MIT"

@@ -1,14 +1,13 @@
 [package]
 name = "bytebraise"
 description = "Proof-of-concept experiment to see how much of BitBake can be implemented in Rust"
-homepage = "https://github.com/Agilent/bytebraise"
-repository = "https://github.com/Agilent/bytebraise"
 version = "0.1.4"
-authors = ["Chris Laplante <chris.laplante@agilent.com>"]
-license = "MIT"
 edition = "2024"
 
-exclude = [ "/.idea" ]
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1"

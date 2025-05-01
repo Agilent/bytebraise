@@ -3,6 +3,11 @@ name = "bytebraise-syntax"
 version = "0.1.0"
 edition = "2024"
 
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
 [dependencies]
 rowan = "0.16.1"
 itertools = "0.14.0"
