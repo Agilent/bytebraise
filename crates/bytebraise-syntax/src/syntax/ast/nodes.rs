@@ -4,7 +4,7 @@ use crate::syntax::ast::quoted_value::QuotedValue;
 use crate::syntax::ast::tokens::{
     AssignmentOperator, DirectiveArgument, Identifier, PythonDefFunctionName, Varflag,
 };
-use crate::syntax::ast::{support, tokens, AstChildren, AstNode, AstToken, SyntaxKind, SyntaxNode};
+use crate::syntax::ast::{AstChildren, AstNode, AstToken, SyntaxKind, SyntaxNode, support, tokens};
 
 ast_node!(Assignment, AssignmentNode);
 impl Assignment {

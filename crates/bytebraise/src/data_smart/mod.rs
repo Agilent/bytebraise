@@ -11,13 +11,13 @@ use indexmap::set::IndexSet;
 use once_cell::sync::Lazy;
 pub use public_interface::DataSmart;
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
+use scopeguard::{ScopeGuard, defer, guard};
 use utils::split_filter_empty;
 use variable_contents::{VariableContents, VariableContentsAccessors};
 
 use crate::data_smart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::overrides::{PerVarOverrideData, VarAndOverrideTuple};
-use crate::data_smart::utils::{split_keep, ReplaceFallible};
+use crate::data_smart::utils::{ReplaceFallible, split_keep};
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::handle_python;
 

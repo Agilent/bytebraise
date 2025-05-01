@@ -3,9 +3,9 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use bytebraise::data_smart::DataSmart;
+use bytebraise::evaluate::Evaluate;
 use bytebraise_syntax::parser::parse_bitbake_from_str;
 use clap::Parser;
-use bytebraise::evaluate::Evaluate;
 
 #[derive(Parser)]
 struct Opts {

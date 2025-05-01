@@ -2,13 +2,15 @@ use crate::build;
 use crate::data_smart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::{DataSmart, GetVarOptions};
-use bytebraise_syntax::parser::parser::parse_bitbake_from_str;
 #[cfg(feature = "python")]
 use crate::python::method_pool::compile_function;
-use bytebraise_syntax::syntax::ast::nodes::{Assignment, Directive, PythonDef, Root, RootItem, Task};
+use anyhow::Context;
+use bytebraise_syntax::parser::parser::parse_bitbake_from_str;
+use bytebraise_syntax::syntax::ast::nodes::{
+    Assignment, Directive, PythonDef, Root, RootItem, Task,
+};
 use bytebraise_syntax::syntax::ast::{AstNode, AstToken};
 use bytebraise_syntax::syntax::syntax_kind::SyntaxKind;
-use anyhow::Context;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};

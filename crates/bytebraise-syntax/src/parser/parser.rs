@@ -1,11 +1,11 @@
 use std::iter::Peekable;
 
-use rowan::{Checkpoint, GreenNodeBuilder, NodeOrToken};
-use bytebraise_lexer::lexer::tokenize;
 use crate::syntax::ast::nodes::Root;
 use crate::syntax::ast::{AstNode, AstToken};
-use crate::syntax::syntax_kind::{syntax_kind_for_token_kind, SyntaxKind};
+use crate::syntax::syntax_kind::{SyntaxKind, syntax_kind_for_token_kind};
 use crate::syntax::syntax_node::{SyntaxElement, SyntaxNode};
+use bytebraise_lexer::lexer::tokenize;
+use rowan::{Checkpoint, GreenNodeBuilder, NodeOrToken};
 
 struct Parser<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> {
     builder: GreenNodeBuilder<'static>,

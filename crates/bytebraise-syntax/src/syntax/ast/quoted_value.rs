@@ -8,8 +8,8 @@ use itertools::Itertools;
 use nested_intervals::IntervalSet;
 use rowan::{TextRange, TextSize};
 
-use crate::syntax::ast::tokens::{DoubleQuotedValue, SingleQuotedValue};
 use crate::syntax::ast::AstToken;
+use crate::syntax::ast::tokens::{DoubleQuotedValue, SingleQuotedValue};
 use crate::syntax::make;
 use crate::syntax::syntax_kind::SyntaxKind;
 use crate::syntax::syntax_node::SyntaxToken;

@@ -1,9 +1,9 @@
 use crate::data_smart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::utils::ReplaceFallible;
 use crate::data_smart::variable_parse::VariableParse;
+use crate::python::PYTHON_EXPANSION_REGEX;
 use crate::python::data_smart::PyDataSmart;
 use crate::python::method_pool::method_pool;
-use crate::python::PYTHON_EXPANSION_REGEX;
 use anyhow::Context;
 use once_cell::sync::Lazy;
 use pyo3::py_run;

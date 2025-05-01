@@ -615,8 +615,9 @@ mod flags {
 
     ported_datasmart_flag_test!(delflag, d, {
         d.del_var_flag("foo", "flag2");
-        assert!(d
-            .get_var_flag_contents("foo", "flag2", GetVarOptions::default().expand(false))?
-            .is_none());
+        assert!(
+            d.get_var_flag_contents("foo", "flag2", GetVarOptions::default().expand(false))?
+                .is_none()
+        );
     });
 }

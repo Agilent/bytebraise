@@ -1,7 +1,7 @@
 use anyhow::Context;
 use pyo3::exceptions::{PyException, PyRuntimeError};
 use pyo3::prelude::*;
-use pyo3::{create_exception, PyObject, PyRefMut};
+use pyo3::{PyObject, PyRefMut, create_exception};
 use std::collections::HashSet;
 
 use crate::data_smart::errors::DataSmartError;

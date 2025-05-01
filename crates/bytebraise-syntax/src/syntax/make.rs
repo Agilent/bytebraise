@@ -2,9 +2,9 @@
 // is under MIT license.
 
 use crate::parser::parse_bitbake_from_str;
+use crate::syntax::ast::AstNode;
 use crate::syntax::ast::nodes::Assignment;
 use crate::syntax::ast::quoted_value::QuotedValue;
-use crate::syntax::ast::AstNode;
 use itertools::Itertools;
 
 pub fn ast_from_text<N: AstNode>(text: &str) -> N {
