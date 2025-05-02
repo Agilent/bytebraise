@@ -116,7 +116,6 @@ impl AddTask {
 
 ast_node!(DelTask, DelTaskNode);
 ast_node!(AddHandler, AddHandlerNode);
-ast_node!(Comment, Comment);
 
 ast_node!(IdentifierExpression, IdentifierExpressionNode);
 impl IdentifierExpression {
@@ -173,7 +172,6 @@ impl<'a> Iterator for IdentifierAssignments<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RootItem {
     Task(Task),
-    Comment(Comment),
     Directive(Directive),
     PythonDef(PythonDef),
     Assignment(Assignment),
@@ -186,7 +184,6 @@ impl AstNode for RootItem {
     {
         match kind {
             SyntaxKind::TaskNode
-            | SyntaxKind::Comment
             | SyntaxKind::PythonDefNode
             | SyntaxKind::AssignmentNode => true,
             k if Directive::can_cast(k) => true,
@@ -200,7 +197,6 @@ impl AstNode for RootItem {
     {
         let res = match syntax.kind() {
             SyntaxKind::TaskNode => RootItem::Task(Task { syntax }),
-            SyntaxKind::Comment => RootItem::Comment(Comment { syntax }),
             SyntaxKind::PythonDefNode => RootItem::PythonDef(PythonDef { syntax }),
             SyntaxKind::AssignmentNode => RootItem::Assignment(Assignment { syntax }),
             k if Directive::can_cast(k) => RootItem::Directive(Directive::cast(syntax).unwrap()),
@@ -213,7 +209,6 @@ impl AstNode for RootItem {
     fn syntax(&self) -> &SyntaxNode {
         match self {
             RootItem::Task(it) => &it.syntax,
-            RootItem::Comment(it) => &it.syntax,
             RootItem::Directive(it) => it.syntax(),
             RootItem::PythonDef(it) => &it.syntax,
             RootItem::Assignment(it) => &it.syntax,

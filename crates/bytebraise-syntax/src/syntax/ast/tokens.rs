@@ -30,6 +30,9 @@ ast_token!(Colon, Colon);
 ast_token!(PythonDefFunctionBody, PythonDefFunctionBody);
 
 ast_token!(Varflag, Varflag);
+
+ast_token!(Comment, Comment);
+
 impl Varflag {
     pub fn value(&self) -> &str {
         // Slice off the square brackets

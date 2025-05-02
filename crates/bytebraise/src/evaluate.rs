@@ -40,7 +40,6 @@ impl Evaluate for Root {
 impl Evaluate for RootItem {
     fn evaluate(&self, d: &DataSmart) -> DataSmartResult<()> {
         match self {
-            RootItem::Comment(_c) => Ok(()),
             RootItem::Assignment(e) => e.evaluate(d),
             RootItem::Directive(directive) => directive.evaluate(d),
             RootItem::PythonDef(p) => p.evaluate(d),
