@@ -169,6 +169,7 @@ impl<'a> Iterator for IdentifierAssignments<'a> {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RootItem {
     Task(Task),
