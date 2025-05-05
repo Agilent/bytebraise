@@ -2,7 +2,8 @@
 members = [
     "crates/bytebraise",
     "crates/bytebraise-lexer",
-    "crates/bytebraise-syntax"
+    "crates/bytebraise-syntax",
+    "crates/bytebraise-util"
 ]
 
 exclude = [ "/.idea" ]

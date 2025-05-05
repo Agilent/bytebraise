@@ -20,3 +20,4 @@ anyhow = "1"
 maplit = "1"
 
 bytebraise-lexer = { path = "../bytebraise-lexer", version = "0.1.0" }
+bytebraise-util = { path = "../bytebraise-util", version = "0.1.0" }

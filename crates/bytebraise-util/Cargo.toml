@@ -1,0 +1,12 @@
+[package]
+name = "bytebraise-util"
+version = "0.1.0"
+edition = "2024"
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+itertools = "0.14.0"
+rowan = "0.16.1"
