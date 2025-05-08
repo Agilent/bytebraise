@@ -6,5 +6,4 @@ pub mod cooker_data;
 pub mod data_smart;
 pub mod evaluate;
 pub mod python;
-pub mod split_var_value;
 pub mod utils;

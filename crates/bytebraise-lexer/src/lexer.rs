@@ -263,7 +263,7 @@ fn scan_quoted_value(start: usize, m: &mut Muncher, quote_char: char) -> Token {
                     // Escaped newline followed by end-of-input or an empty line is an error
                     let p = m.peek();
                     m.reset_peek();
-                    if let None | Some('\n') = p {
+                    if matches!(p, None | Some('\n')) {
                         let end = m.position();
                         let e = LexerError {
                             kind: LexerErrorKind::UnterminatedLineContinuation,
