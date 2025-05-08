@@ -12,4 +12,4 @@ exclude = [ "/.idea" ]
 homepage = "https://github.com/Agilent/bytebraise"
 repository = "https://github.com/Agilent/bytebraise"
 authors = ["Chris Laplante <chris.laplante@agilent.com>"]
-license = "MIT"
+license = "GPL-2.0-only"
