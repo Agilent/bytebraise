@@ -182,13 +182,11 @@ impl VariableParse {
                 Ok(result) => Ok(result.str().unwrap().to_string()),
                 Err(e) => {
                     if e.is_instance_of::<PySyntaxError>(py) {
-                        let err_value = e.value(py).str().unwrap();
-                        return if err_value
-                            .to_str()
-                            .unwrap()
-                            .starts_with("EOL while scanning string literal")
+                        let err_value = e.value(py).str().unwrap().to_str().unwrap().to_string();
+                        return if err_value.contains("EOL while scanning string literal")
+                            || err_value.starts_with("unterminated string literal")
                         {
-                            // ignore, just mismatched braces
+                            // ignore, just mismatched braces - leave unexpanded
                             Ok(match_str.to_string())
                         } else {
                             // TODO: possible to shove PySyntaxError itself into result?
