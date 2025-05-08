@@ -211,8 +211,6 @@ impl DataSmartInner {
     }
 
     fn _klist(&self) -> HashSet<String> {
-        
-
         RefCell::borrow(&self.data)
             .keys()
             .cloned()

@@ -184,9 +184,7 @@ impl AstNode for RootItem {
         Self: Sized,
     {
         match kind {
-            SyntaxKind::TaskNode
-            | SyntaxKind::PythonDefNode
-            | SyntaxKind::AssignmentNode => true,
+            SyntaxKind::TaskNode | SyntaxKind::PythonDefNode | SyntaxKind::AssignmentNode => true,
             k if Directive::can_cast(k) => true,
             _ => false,
         }

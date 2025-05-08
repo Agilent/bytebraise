@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
-use crate::syntax::ast::nodes::Root;
 use crate::syntax::ast::AstNode;
+use crate::syntax::ast::nodes::Root;
 use crate::syntax::syntax_kind::{SyntaxKind, syntax_kind_for_token_kind};
 use crate::syntax::syntax_node::{SyntaxElement, SyntaxNode};
 use bytebraise_lexer::lexer::tokenize;
