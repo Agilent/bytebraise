@@ -3,6 +3,7 @@ use bytebraise_lexer::token::TokenKind;
 pub fn syntax_kind_for_token_kind(token_kind: TokenKind) -> SyntaxKind {
     match token_kind {
         TokenKind::Error(_) => unimplemented!("TODO return error too"),
+        TokenKind::AddPyLib => SyntaxKind::AddPyLib,
         TokenKind::AddHandler => SyntaxKind::AddHandler,
         TokenKind::AddTask => SyntaxKind::AddTask,
         TokenKind::After => SyntaxKind::After,
@@ -58,6 +59,7 @@ pub enum SyntaxKind {
     // Tokens
     AddHandler,
     AddTask,
+    AddPyLib,
     After,
     Before,
     CloseParenthesis,

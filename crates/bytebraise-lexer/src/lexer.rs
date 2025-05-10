@@ -51,6 +51,7 @@ static BITBAKE_KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "require" => TokenKind::Require,
     "unset" => TokenKind::Unset,
     "EXPORT_FUNCTIONS" => TokenKind::ExportFunctions,
+    "addpylib" => TokenKind::AddPyLib,
 };
 
 #[inline]
@@ -634,7 +635,12 @@ impl<'input> BitbakeLexer<'input> {
                                 match token.kind {
                                     TokenKind::Inherit
                                     | TokenKind::Include
-                                    | TokenKind::Require => {
+                                    | TokenKind::Require
+                                    // TODO: addpylib args don't need full flexibility of unquoted
+                                    //  value since it can't contain spaces, but it also isn't quite
+                                    //  a directive argument, since it can have $. For now, just
+                                    //  consume it as a single unquoted value.
+                                    | TokenKind::AddPyLib => {
                                         self.state = BitbakeLexerState::ExpectUnquotedValue
                                     }
                                     TokenKind::PythonDefKeyword => {

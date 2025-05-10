@@ -273,6 +273,14 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
         true
     }
 
+    fn parse_add_py_lib_node(&mut self) -> bool {
+        self.builder.start_node(SyntaxKind::AddPyLib.into());
+        self.expect(SyntaxKind::AddPyLib);
+        self.expect(SyntaxKind::UnquotedValue);
+        self.builder.finish_node();
+        true
+    }
+
     fn parse_next(&mut self) -> bool {
         match self.peek() {
             Some(token) => match token {
@@ -292,6 +300,7 @@ impl<'text, I: Iterator<Item = (SyntaxKind, &'text str)>> Parser<'text, I> {
                 SyntaxKind::AddTask => self.parse_add_task_node(),
                 SyntaxKind::DelTask => self.parse_del_task_node(),
                 SyntaxKind::AddHandler => self.parse_add_handler_node(),
+                SyntaxKind::AddPyLib => self.parse_add_py_lib_node(),
 
                 _ => panic!("{token:?}"),
             },

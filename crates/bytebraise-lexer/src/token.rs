@@ -31,6 +31,7 @@ pub enum TokenKind {
 
     AddHandler,
     AddTask,
+    AddPyLib,
     After,
     Before,
     CloseParenthesis,
