@@ -508,6 +508,8 @@ impl<'input> BitbakeLexer<'input> {
                                     &mut self.muncher,
                                 );
                                 self.state = BitbakeLexerState::Normal;
+                            } else {
+                                unimplemented!();
                             }
                         }
                         _ => {
