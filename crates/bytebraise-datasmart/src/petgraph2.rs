@@ -1,3 +1,26 @@
+/*!
+Experimental algorithmic implementation of BitBake data_smart using a priority heap to encode
+operations.
+
+Implemented:
+    - setVar/getVar/delVar
+    - expandKeys
+    - overrides
+    - operators
+
+Major todos:
+    - Caching
+    - Parsing mode
+    - Non-string data - this prints 3:
+        python() {
+            d.setVar("TEST2", 1)
+            d.setVar("TEST2:append", 2)
+            bb.fatal("TEST2 = " + str(d.getVar("TEST2")))
+        }
+    - Varflags
+    - Variable history
+*/
+
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -6,8 +29,8 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
-use scopeguard::{ScopeGuard, defer, guard};
-use std::cell::{LazyCell, RefCell};
+use scopeguard::{defer, guard, ScopeGuard};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
@@ -523,7 +546,7 @@ impl DataSmart {
     pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
         let var = var.as_ref();
 
-        let var_parts = var.split_once(':');
+        //let var_parts = var.split_once(':');
 
         // TODO: handle override syntax, e.g. getVar("A:pn-waves")
         //  All this should have to do (TM) is apply a pre-filter to the variable operations.
@@ -634,6 +657,7 @@ impl DataSmart {
             })
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
+                // Fold synthesized appends
                 a.heap.retain(|item| {
                     !item.0.is_synthesized_operation()
                         || (item.0.unexpanded_override != b.unexpanded_override)
@@ -858,7 +882,7 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
-    use crate::petgraph2::{DataSmart, score_override};
+    use crate::petgraph2::{score_override, DataSmart};
     use indexmap::IndexSet;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
@@ -1335,6 +1359,15 @@ mod test {
 
     #[test]
     fn synthesized_appends() {
+        // The behavior of appends vs synthesized appends is different.
+        // Normal appends stack:
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "10");
+        d.set_var("TEST:append", "1");
+        d.set_var("TEST:append", "2");
+        assert_eq!(d.get_var("TEST"), Some("1012".into()));
+
+        // But synthesize appends only take the last one:
         let mut d = DataSmart::new();
         d.set_var("TEST", "10");
         d.set_var("TEST:${A}", "1");
