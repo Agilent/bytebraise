@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::iter;
@@ -17,6 +17,7 @@ use scopeguard::{defer, guard, ScopeGuard};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
 use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
+use bytebraise_util::fifo_heap::FifoHeap;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -27,12 +28,6 @@ static KEYWORD_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?:^|:)(?P<keyword>append|prepend|remove)(?:$|:)").unwrap());
 
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
-
-#[derive(Clone, Debug)]
-pub struct FifoHeap<T> {
-    seq: usize,
-    heap: BTreeSet<(T, usize)>,
-}
 
 // TODO: An 'assign' may actually act as an 'append' (or others) e.g.
 //  P = ""
@@ -175,37 +170,6 @@ impl Ord for VariableOperation {
 impl PartialOrd for VariableOperation {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl<T: Ord> Default for FifoHeap<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: Ord> FifoHeap<T> {
-    pub fn new() -> Self {
-        FifoHeap {
-            seq: usize::MIN,
-            heap: BTreeSet::new(),
-        }
-    }
-
-    pub fn push(&mut self, val: T) {
-        let seq = self.seq.checked_add(1).unwrap();
-        self.seq = seq;
-        self.heap.insert((val, seq));
-    }
-}
-
-impl<T: Ord> FromIterator<T> for FifoHeap<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut ret = FifoHeap::new();
-        for i in iter {
-            ret.push(i);
-        }
-        ret
     }
 }
 
