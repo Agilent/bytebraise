@@ -1,8 +1,3 @@
-use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Display};
-
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -12,6 +7,11 @@ use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
+use std::cell::{LazyCell, RefCell};
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display};
+use std::sync::LazyLock;
 
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
@@ -52,15 +52,19 @@ struct DataSmart {
     inside_compute_overrides: RefCell<()>,
 }
 
+// TODO: better way?
+static EMPTY_OVERRIDES: LazyLock<IndexSet<String>> = LazyLock::new(|| IndexSet::new());
+
 // TODO: need to support more than 64 overrides?
 fn score_override(
     active_overrides: &Option<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
 ) -> Option<(Vec<usize>, usize, usize)> {
-    eprintln!("scoring {candidate_overrides:?}");
+    dbg!(&candidate_overrides, &active_overrides);
     // Reject this override if it contains terms not in active override set
-    // TODO: change this to not clone
-    let temp_cloned_active_overrides = active_overrides.clone().unwrap_or_default();
+    let temp_cloned_active_overrides = active_overrides
+        .as_ref()
+        .unwrap_or_else(|| &EMPTY_OVERRIDES);
 
     let c: IndexSet<String> = candidate_overrides.iter().cloned().collect();
     if !c.is_subset(&temp_cloned_active_overrides) {
@@ -326,7 +330,10 @@ impl DataSmart {
         if check_keyword {
             let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-            if keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())).is_some() {
+            if keyword_match
+                .and_then(|m| m.name("keyword").map(|k| k.as_str()))
+                .is_some()
+            {
                 unimplemented!()
             };
         }
@@ -360,6 +367,13 @@ impl DataSmart {
     pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
         let var = var.into();
         let value = value.into();
+
+        #[cfg(test)]
+        if var == "OVERRIDES" && self.vars.contains_key("OVERRIDES") {
+            unimplemented!(
+                "OVERRIDES are already set! Re-computing OVERRIDES not implemented yet."
+            );
+        }
 
         let var_parts = var.split_once(':');
         let override_str = var_parts.map(|parts| parts.1);
@@ -519,15 +533,16 @@ impl DataSmart {
         let w = self.ds.node_weight(*var_entry).unwrap();
         let var_data = w.variable();
 
-        // TODO: return directly from `override_state` for OVERRIDES?
-        if var != "OVERRIDES" {
-            let cached = RefCell::borrow_mut(&var_data.cached_value);
-            if cached.is_some() {
-                return cached.clone();
-            }
-        }
+        // // TODO: return directly from `override_state` for OVERRIDES?
+        // if var != "OVERRIDES" {
+        //     let cached = RefCell::borrow_mut(&var_data.cached_value);
+        //     if cached.is_some() {
+        //         return cached.clone();
+        //     }
+        // }
 
         // TODO: only do this if needed, i.e. if any operations with overrides are present
+        // TODO: this method doesn't handle re-computing overrides!
         self.compute_overrides().unwrap();
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
@@ -627,7 +642,7 @@ impl DataSmart {
                 a
             });
 
-        eprintln!("{resolved_variable_operations:#?}");
+        dbg!(&resolved_variable_operations);
 
         eprintln!("SCORING: ");
         for item in resolved_variable_operations.heap.iter() {
@@ -912,6 +927,8 @@ mod test {
         let mut d = DataSmart::new();
         d.set_var("TEST", "1");
         d.set_var("TEST:more", "2");
+
+        // All applicable overrides (at the same score level) are applied.
         d.set_var("TEST:more:specific", "3");
         d.set_var("TEST:more:specific", "4");
         d.set_var("OVERRIDES", "more:specific");
