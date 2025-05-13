@@ -6,7 +6,7 @@ use std::hash::Hash;
 use std::iter;
 
 use fxhash::FxHashMap;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexSet;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::graph::NodeIndex;
@@ -18,6 +18,7 @@ use scopeguard::{defer, guard, ScopeGuard};
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
 use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
 use bytebraise_util::fifo_heap::FifoHeap;
+use bytebraise_util::retain_with_index::RetainWithIndex;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -260,26 +261,6 @@ fn score_override(
     }
 
     Some(ret)
-}
-
-trait RetainWithIndex<T> {
-    fn retain_with_index<F>(&mut self, f: F)
-    where
-        F: FnMut(&T, usize) -> bool;
-}
-
-impl<T> RetainWithIndex<T> for Vec<T> {
-    fn retain_with_index<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&T, usize) -> bool,
-    {
-        let mut i = 0;
-        self.retain(|x| {
-            let should_retain = f(x, i);
-            i += 1; // Increment index on each iteration
-            should_retain
-        });
-    }
 }
 
 fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
@@ -927,43 +908,6 @@ impl DataSmart {
         Some(ret_str)
     }
 }
-/// Return an `IndexMap` of keys mapped to a list of their corresponding values.
-///
-/// Code based on [`.into_group_map()`](crate::Itertools::into_group_map)
-pub fn into_index_map<I, K, V>(iter: I) -> IndexMap<K, Vec<V>>
-where
-    I: Iterator<Item = (K, V)>,
-    K: Hash + Eq,
-{
-    let mut lookup = IndexMap::new();
-
-    iter.for_each(|(key, val)| {
-        lookup.entry(key).or_insert_with(Vec::new).push(val);
-    });
-
-    lookup
-}
-
-pub fn into_index_map_by<I, K, V>(iter: I, f: impl Fn(&V) -> K) -> IndexMap<K, Vec<V>>
-where
-    I: Iterator<Item = V>,
-    K: Hash + Eq,
-{
-    into_index_map(iter.map(|v| (f(&v), v)))
-}
-
-trait IntoIndexMap: Iterator {
-    fn into_index_map_by<K, V, F>(self, f: F) -> IndexMap<K, Vec<V>>
-    where
-        Self: Iterator<Item = V> + Sized,
-        K: Hash + Eq,
-        F: Fn(&V) -> K,
-    {
-        into_index_map_by(self, f)
-    }
-}
-
-impl<T> IntoIndexMap for T where T: Iterator + ?Sized {}
 
 #[derive(Debug)]
 struct Variable {

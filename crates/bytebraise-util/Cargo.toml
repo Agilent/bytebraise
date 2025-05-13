@@ -9,4 +9,5 @@ license.workspace = true
 
 [dependencies]
 itertools = "0.14.0"
+indexmap = "2"
 rowan = "0.16.1"
