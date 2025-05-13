@@ -195,7 +195,7 @@ fn score_override(
     active_overrides: &Option<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
 ) -> Option<(Vec<usize>, usize, usize)> {
-    eprintln!("scoring {:?}", candidate_overrides);
+    eprintln!("scoring {candidate_overrides:?}");
     // Reject this override if it contains terms not in active override set
     // TODO: change this to not clone
     let temp_cloned_active_overrides = active_overrides.clone().unwrap_or_default();
@@ -211,7 +211,7 @@ fn score_override(
     }
 
     if let Some(active_overrides) = active_overrides {
-        ret = (iter::repeat(0).take(active_overrides.len()).collect(), 0, 0);
+        ret = (std::iter::repeat_n(0, active_overrides.len()).collect(), 0, 0);
 
         let mut candidate = candidate_overrides.clone();
 
@@ -234,7 +234,7 @@ fn score_override(
             eprintln!("iteration {}", ret.1);
             ret.1 += 1;
             for (ai, active_override) in active_overrides.iter().enumerate() {
-                eprintln!("\tconsider override {}", active_override);
+                eprintln!("\tconsider override {active_override}");
                 if candidate.len() == 1 && &candidate[0] == active_override {
                     assert_eq!(ret.2, 0);
                     ret.2 = ai + 1;
@@ -244,7 +244,7 @@ fn score_override(
                     //eprintln!("{:?}", candidate);
                     candidate.retain_with_index(|c, i| i == 0 || c != active_override);
 
-                    eprintln!("\t\ttransform {:?} => {:?}", old, candidate);
+                    eprintln!("\t\ttransform {old:?} => {candidate:?}");
 
                     assert_ne!(old, candidate);
                     keep_going = true;
@@ -307,7 +307,7 @@ impl ResolvedOverridesData {
     fn is_active(&self, active_overrides: &Option<IndexSet<String>>) -> bool {
         active_overrides
             .as_ref()
-            .map_or(false, |active_overrides| match self {
+            .is_some_and(|active_overrides| match self {
                 ResolvedOverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
                 ResolvedOverridesData::PureOverride { overrides, .. } => {
                     let overrides: IndexSet<String> = overrides.iter().cloned().collect();
@@ -460,10 +460,7 @@ impl DataSmart {
         if check_keyword {
             let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-            match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
-                Some(_) => unimplemented!(),
-                _ => {}
-            };
+            if let Some(_) = keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) { unimplemented!() };
         }
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
@@ -762,7 +759,7 @@ impl DataSmart {
                 a
             });
 
-        eprintln!("{:#?}", resolved_variable_operations);
+        eprintln!("{resolved_variable_operations:#?}");
 
         eprintln!("SCORING: ");
         for item in resolved_variable_operations.heap.iter() {
@@ -809,7 +806,7 @@ impl DataSmart {
 
         impl Display for RetValue {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.as_ref().to_string())
+                write!(f, "{}", self.as_ref())
             }
         }
 
@@ -833,7 +830,7 @@ impl DataSmart {
         resolved_variable_operations
             .heap
             .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
-        eprintln!("before filter: {:#?}", resolved_variable_operations);
+        eprintln!("before filter: {resolved_variable_operations:#?}");
 
         // TODO: just filter in loop below
         resolved_variable_operations.heap.retain(|(op, _)| {
@@ -843,7 +840,7 @@ impl DataSmart {
                         || op.override_lhs().is_empty()))
         });
 
-        eprintln!("{:#?}", resolved_variable_operations);
+        eprintln!("{resolved_variable_operations:#?}");
 
         let rhs_filter: IndexSet<String> = resolved_start_value
             .overrides_data
@@ -852,7 +849,7 @@ impl DataSmart {
             .unwrap_or_default();
 
         for (op, _) in &resolved_variable_operations.heap {
-            if !op.overrides_data.as_ref().map_or(true, |od| {
+            if !op.overrides_data.as_ref().is_none_or(|od| {
                 od.is_active(override_state) // && od.is_valid_for_filter(&rhs_filter)
             }) {
                 continue;
