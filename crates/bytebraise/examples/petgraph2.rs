@@ -581,6 +581,14 @@ impl DataSmart {
         Ok(value)
     }
 
+    pub fn del_var<S: AsRef<str>>(&mut self, var: S) -> DataSmartResult<()> {
+        if let Some(idx) = self.vars.remove(var.as_ref()) {
+            self.ds.remove_node(idx).unwrap();
+        }
+
+        Ok(())
+    }
+
     pub fn expand_keys(&mut self) -> DataSmartResult<()> {
         for unexpanded_key in &self.unexpanded_vars {
             let expanded_key = self.expand(unexpanded_key.0)?;
