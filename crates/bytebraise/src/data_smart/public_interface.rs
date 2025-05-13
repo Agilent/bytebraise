@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use anyhow::Context;
 
-use crate::data_smart::errors::DataSmartResult;
+use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::variable_parse::VariableParse;
 use crate::data_smart::{DataSmartInner, GetVarFlagReturn, GetVarOptions, expand_keys};

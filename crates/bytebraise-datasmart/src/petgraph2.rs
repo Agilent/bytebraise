@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::iter;
 
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
@@ -13,12 +12,13 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
-use scopeguard::{ScopeGuard, defer, guard};
+use scopeguard::{defer, guard, ScopeGuard};
 
-use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
-use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
+use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
+use crate::errors::{DataSmartError, DataSmartResult};
+use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -29,143 +29,6 @@ static KEYWORD_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?:^|:)(?P<keyword>append|prepend|remove)(?:$|:)").unwrap());
 
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
-enum StmtKind {
-    WeakDefault,
-    Default,
-    Assign,
-    PlusEqual,
-    EqualPlus,
-    DotEqual,
-    EqualDot,
-    Append,
-    Prepend,
-    Remove,
-}
-
-impl Ord for StmtKind {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.order_value().cmp(&other.order_value())
-    }
-}
-
-impl PartialOrd for StmtKind {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl StmtKind {
-    // Default (?=) is handled at parse time
-    fn order_value(&self) -> u8 {
-        match self {
-            StmtKind::Assign
-            | StmtKind::PlusEqual
-            | StmtKind::EqualPlus
-            | StmtKind::DotEqual
-            | StmtKind::EqualDot => 1,
-            // ?=
-            StmtKind::Default => 2,
-            // ??=
-            StmtKind::WeakDefault => 3,
-            // :remove
-            StmtKind::Append => 4,
-            // :prepend
-            StmtKind::Prepend => 5,
-            // :remove
-            StmtKind::Remove => 6,
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
-enum VariableOperationKind {
-    WeakDefault,
-    Default,
-    Assign,
-    PlusEqual,
-    EqualPlus,
-    DotEqual,
-    EqualDot,
-    Append,
-    SynthesizedAppend,
-    Prepend,
-    SynthesizedPrepend,
-    Remove,
-}
-
-impl From<StmtKind> for VariableOperationKind {
-    fn from(value: StmtKind) -> Self {
-        match value {
-            StmtKind::Assign => Self::Assign,
-            StmtKind::Append => Self::Append,
-            StmtKind::WeakDefault => Self::WeakDefault,
-            StmtKind::PlusEqual => Self::PlusEqual,
-            StmtKind::EqualPlus => Self::EqualPlus,
-            StmtKind::DotEqual => Self::DotEqual,
-            StmtKind::EqualDot => Self::EqualDot,
-            StmtKind::Prepend => Self::Prepend,
-            StmtKind::Remove => Self::Remove,
-            StmtKind::Default => Self::Default,
-        }
-    }
-}
-
-impl Ord for VariableOperationKind {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.order_value().cmp(&other.order_value())
-    }
-}
-
-impl PartialOrd for VariableOperationKind {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl VariableOperationKind {
-    // Default (?=) is handled at parse time
-    fn order_value(&self) -> u8 {
-        match self {
-            VariableOperationKind::Assign
-            | VariableOperationKind::PlusEqual
-            | VariableOperationKind::EqualPlus
-            | VariableOperationKind::DotEqual
-            | VariableOperationKind::EqualDot => 1,
-            // ?=
-            VariableOperationKind::Default => 2,
-            // ??=
-            VariableOperationKind::WeakDefault => 3,
-            // :remove
-            VariableOperationKind::Append => 4,
-            VariableOperationKind::SynthesizedAppend => 5,
-            // :prepend
-            VariableOperationKind::Prepend => 6,
-            VariableOperationKind::SynthesizedPrepend => 7,
-            // :remove
-            VariableOperationKind::Remove => 8,
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-struct VariableOperation {
-    op_type: StmtKind,
-    idx: NodeIndex<DefaultIx>,
-}
-
-impl Ord for VariableOperation {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.op_type.cmp(&other.op_type)
-    }
-}
-
-impl PartialOrd for VariableOperation {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 #[derive(Debug)]
 struct ExpansionState {
@@ -975,8 +838,8 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
-    use crate::{DataSmart, score_override};
     use indexmap::IndexSet;
+    use crate::petgraph2::{score_override, DataSmart};
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");

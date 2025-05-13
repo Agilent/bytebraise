@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/bytebraise",
+    "crates/bytebraise", "crates/bytebraise-datasmart",
     "crates/bytebraise-lexer",
     "crates/bytebraise-syntax",
     "crates/bytebraise-util"

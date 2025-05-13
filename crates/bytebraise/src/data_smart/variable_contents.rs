@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 
 use derive_more::{From, TryInto};
 use lazy_static::lazy_static;
-
-use crate::data_smart::utils::split_filter_empty;
+use bytebraise_util::split::split_filter_empty;
 
 // TODO box more?
 #[derive(Clone, Debug, PartialEq, Eq, From, Hash, Ord, PartialOrd, TryInto)]

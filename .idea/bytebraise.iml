@@ -11,6 +11,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-parser/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-syntax/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-util/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/bytebraise-datasmart/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

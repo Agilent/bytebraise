@@ -11,21 +11,18 @@ use indexmap::set::IndexSet;
 use once_cell::sync::Lazy;
 pub use public_interface::DataSmart;
 use regex::{Captures, Regex};
-use scopeguard::{ScopeGuard, defer, guard};
-use utils::split_filter_empty;
+use scopeguard::{defer, guard, ScopeGuard};
+use bytebraise_datasmart::errors::{DataSmartError, DataSmartResult};
+use bytebraise_util::split::{split_filter_empty, split_keep, ReplaceFallible};
 use variable_contents::{VariableContents, VariableContentsAccessors};
 
-use crate::data_smart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::overrides::{PerVarOverrideData, VarAndOverrideTuple};
-use crate::data_smart::utils::{ReplaceFallible, split_keep};
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::handle_python;
 
-pub mod errors;
 pub mod overrides;
 mod public_interface;
 mod tests;
-pub mod utils;
 pub mod variable_contents;
 pub mod variable_parse;
 

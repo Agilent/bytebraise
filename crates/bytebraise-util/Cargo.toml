@@ -11,3 +11,4 @@ license.workspace = true
 itertools = "0.14.0"
 indexmap = "2"
 rowan = "0.16.1"
+regex = { version = "1", features = ["pattern"] }

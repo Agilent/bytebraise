@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use regex::Captures;
 
-use crate::data_smart::errors::{DataSmartError, DataSmartResult};
+use bytebraise_datasmart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::{DataSmart, GetVarOptions};
 

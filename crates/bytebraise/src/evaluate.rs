@@ -1,5 +1,5 @@
 use crate::build;
-use crate::data_smart::errors::DataSmartResult;
+use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::{DataSmart, GetVarOptions};
 #[cfg(feature = "python")]

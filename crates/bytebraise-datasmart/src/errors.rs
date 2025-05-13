@@ -1,5 +1,6 @@
 use std::io;
-
+#[cfg(feature = "python")]
+use pyo3::{PyErr, exceptions::PyRuntimeError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -7,7 +8,6 @@ pub enum DataSmartError {
     #[error("Unable to convert")]
     DataConversionError,
 
-    #[cfg(test)]
     #[error("Attempt to use ? operator on None")]
     UnwrapNoneError,
 
@@ -33,3 +33,11 @@ pub enum DataSmartError {
 }
 
 pub type DataSmartResult<T> = anyhow::Result<T>;
+
+#[cfg(feature = "python")]
+impl From<DataSmartError> for PyErr {
+    // TODO: more specific error types
+    fn from(err: DataSmartError) -> PyErr {
+        PyRuntimeError::new_err(err.to_string())
+    }
+}

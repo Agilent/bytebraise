@@ -1,0 +1,27 @@
+[package]
+name = "bytebraise-datasmart"
+version = "0.1.0"
+edition = "2024"
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1"
+bytebraise-util = { path = "../bytebraise-util", version = "0.1.0" }
+thiserror = "2"
+petgraph = "0.8.1"
+fxhash = "0.2.1"
+indexmap = "2"
+itertools = "0.14.0"
+once_cell = "1"
+scopeguard = "1"
+regex = "1"
+
+pyo3 = { version = "0.19.2", features = ["auto-initialize", "anyhow"], optional = true }
+python-parser = { version = "0.2.0", optional = true }
+
+[features]
+default = []
+python = ["python-parser", "pyo3"]

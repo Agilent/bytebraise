@@ -1,11 +1,9 @@
-use crate::data_smart::errors::{DataSmartError, DataSmartResult};
-use crate::data_smart::utils::ReplaceFallible;
+use bytebraise_datasmart::errors::{DataSmartError, DataSmartResult};
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::PYTHON_EXPANSION_REGEX;
 use crate::python::data_smart::PyDataSmart;
 use crate::python::method_pool::method_pool;
 use anyhow::Context;
-use once_cell::sync::Lazy;
 use pyo3::py_run;
 use regex::{Captures, Regex};
 use std::borrow::Cow;
@@ -20,6 +18,7 @@ use {
     pyo3::types::PyList,
     pyo3::{PyCell, Python, ToPyObject},
 };
+use bytebraise_util::split::ReplaceFallible;
 
 pub fn handle_python<'a>(
     input: &'a Cow<'a, str>,

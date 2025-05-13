@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::{PyObject, PyRefMut, create_exception};
 use std::collections::HashSet;
 
-use crate::data_smart::errors::DataSmartError;
+use bytebraise_datasmart::errors::DataSmartError;
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::{DataSmart, GetVarFlagReturn, GetVarOptions};
 
@@ -130,12 +130,5 @@ impl IntoPy<PyObject> for VariableContents {
             VariableContents::Option(opt) => opt.map(|v| v.into_py(py)).into_py(py),
             VariableContents::Tuple(tup) => (tup.0.into_py(py), tup.1.into_py(py)).into_py(py),
         }
-    }
-}
-
-impl std::convert::From<DataSmartError> for PyErr {
-    // TODO: more specific error types
-    fn from(err: DataSmartError) -> PyErr {
-        PyRuntimeError::new_err(err.to_string())
     }
 }

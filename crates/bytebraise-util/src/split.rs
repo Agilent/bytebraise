@@ -1,8 +1,7 @@
-use std::borrow::Cow;
-use std::iter::{Enumerate, Rev};
 use std::str;
+use std::iter::{Enumerate, Rev};
 use std::str::Chars;
-
+use std::borrow::Cow;
 use regex::{Captures, Regex};
 
 pub fn split_filter_empty<'a>(input: &'a str, separator: &'a str) -> impl Iterator<Item = &'a str> {
@@ -19,7 +18,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use bytebraise::data_smart::utils::RSplitAll;
+    /// use bytebraise_util::split::RSplitAll;
     /// let input = "VAR_foo_bar_local";
     /// let mut iter = input.rsplit_all('_');
     /// assert_eq!(iter.next(), Some(("VAR_foo_bar", "local")));

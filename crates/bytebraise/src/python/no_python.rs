@@ -1,4 +1,4 @@
-use crate::data_smart::errors::DataSmartResult;
+use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::PYTHON_EXPANSION_REGEX;
 use std::borrow::Cow;

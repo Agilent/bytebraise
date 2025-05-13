@@ -7,8 +7,7 @@ use core::iter;
 use im_rc::HashMap;
 use lazy_static::lazy_static;
 use regex::Regex;
-
-use crate::data_smart::utils::RSplitAll;
+use bytebraise_util::split::RSplitAll;
 
 lazy_static! {
     static ref OVERRIDE_REGEX: Regex = Regex::new(r"[a-z0-9]+").unwrap();
