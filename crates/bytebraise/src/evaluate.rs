@@ -1,10 +1,10 @@
 use crate::build;
-use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::{VariableContents, VariableContentsAccessors};
 use crate::data_smart::{DataSmart, GetVarOptions};
 #[cfg(feature = "python")]
 use crate::python::method_pool::compile_function;
 use anyhow::Context;
+use bytebraise_datasmart::errors::DataSmartResult;
 use bytebraise_syntax::parser::parser::parse_bitbake_from_str;
 use bytebraise_syntax::syntax::ast::nodes::{
     Assignment, Directive, PythonDef, Root, RootItem, Task,

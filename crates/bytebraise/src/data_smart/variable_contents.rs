@@ -4,9 +4,9 @@ use std::fmt::Debug;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 
+use bytebraise_util::split::split_filter_empty;
 use derive_more::{From, TryInto};
 use lazy_static::lazy_static;
-use bytebraise_util::split::split_filter_empty;
 
 // TODO box more?
 #[derive(Clone, Debug, PartialEq, Eq, From, Hash, Ord, PartialOrd, TryInto)]

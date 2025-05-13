@@ -4,10 +4,10 @@ Helper functions and data structures for manipulating overrides and conditional 
 
 use core::iter;
 
+use bytebraise_util::split::RSplitAll;
 use im_rc::HashMap;
 use lazy_static::lazy_static;
 use regex::Regex;
-use bytebraise_util::split::RSplitAll;
 
 lazy_static! {
     static ref OVERRIDE_REGEX: Regex = Regex::new(r"[a-z0-9]+").unwrap();

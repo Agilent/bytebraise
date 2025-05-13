@@ -12,13 +12,13 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
+use scopeguard::{ScopeGuard, defer, guard};
 
+use crate::errors::{DataSmartError, DataSmartResult};
+use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
 use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
-use crate::errors::{DataSmartError, DataSmartResult};
-use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -74,7 +74,11 @@ fn score_override(
     }
 
     if let Some(active_overrides) = active_overrides {
-        ret = (std::iter::repeat_n(0, active_overrides.len()).collect(), 0, 0);
+        ret = (
+            std::iter::repeat_n(0, active_overrides.len()).collect(),
+            0,
+            0,
+        );
 
         let mut candidate = candidate_overrides.clone();
 
@@ -323,7 +327,9 @@ impl DataSmart {
         if check_keyword {
             let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-            if let Some(_) = keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) { unimplemented!() };
+            if let Some(_) = keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
+                unimplemented!()
+            };
         }
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
@@ -838,8 +844,8 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
+    use crate::petgraph2::{DataSmart, score_override};
     use indexmap::IndexSet;
-    use crate::petgraph2::{score_override, DataSmart};
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");

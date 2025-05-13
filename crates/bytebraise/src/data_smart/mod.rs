@@ -6,14 +6,14 @@ use std::iter::FromIterator;
 use std::rc::{Rc, Weak};
 
 use anyhow::Context;
+use bytebraise_datasmart::errors::{DataSmartError, DataSmartResult};
+use bytebraise_util::split::{ReplaceFallible, split_filter_empty, split_keep};
 use im_rc::HashMap;
 use indexmap::set::IndexSet;
 use once_cell::sync::Lazy;
 pub use public_interface::DataSmart;
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
-use bytebraise_datasmart::errors::{DataSmartError, DataSmartResult};
-use bytebraise_util::split::{split_filter_empty, split_keep, ReplaceFallible};
+use scopeguard::{ScopeGuard, defer, guard};
 use variable_contents::{VariableContents, VariableContentsAccessors};
 
 use crate::data_smart::overrides::{PerVarOverrideData, VarAndOverrideTuple};

@@ -4,9 +4,9 @@ use pyo3::prelude::*;
 use pyo3::{PyObject, PyRefMut, create_exception};
 use std::collections::HashSet;
 
-use bytebraise_datasmart::errors::DataSmartError;
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::{DataSmart, GetVarFlagReturn, GetVarOptions};
+use bytebraise_datasmart::errors::DataSmartError;
 
 #[pyclass(unsendable)]
 pub struct PyDataSmart {

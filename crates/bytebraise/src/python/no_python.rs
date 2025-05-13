@@ -1,6 +1,6 @@
-use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_parse::VariableParse;
 use crate::python::PYTHON_EXPANSION_REGEX;
+use bytebraise_datasmart::errors::DataSmartResult;
 use std::borrow::Cow;
 
 pub fn handle_python<'a>(

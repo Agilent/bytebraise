@@ -1,3 +1,3 @@
-pub mod variable_operation;
-pub mod petgraph2;
 pub mod errors;
+pub mod petgraph2;
+pub mod variable_operation;

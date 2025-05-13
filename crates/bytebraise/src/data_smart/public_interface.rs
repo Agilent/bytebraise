@@ -4,10 +4,10 @@ use std::rc::Rc;
 
 use anyhow::Context;
 
-use bytebraise_datasmart::errors::DataSmartResult;
 use crate::data_smart::variable_contents::VariableContents;
 use crate::data_smart::variable_parse::VariableParse;
 use crate::data_smart::{DataSmartInner, GetVarFlagReturn, GetVarOptions, expand_keys};
+use bytebraise_datasmart::errors::DataSmartResult;
 
 #[cfg(feature = "python")]
 use pyo3::pyclass;

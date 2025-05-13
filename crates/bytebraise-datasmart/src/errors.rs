@@ -1,6 +1,6 @@
-use std::io;
 #[cfg(feature = "python")]
 use pyo3::{PyErr, exceptions::PyRuntimeError};
+use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

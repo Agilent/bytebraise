@@ -1,8 +1,8 @@
-use std::str;
-use std::iter::{Enumerate, Rev};
-use std::str::Chars;
-use std::borrow::Cow;
 use regex::{Captures, Regex};
+use std::borrow::Cow;
+use std::iter::{Enumerate, Rev};
+use std::str;
+use std::str::Chars;
 
 pub fn split_filter_empty<'a>(input: &'a str, separator: &'a str) -> impl Iterator<Item = &'a str> {
     input.split(separator).filter(|v| !v.is_empty())
