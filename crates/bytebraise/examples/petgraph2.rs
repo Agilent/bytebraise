@@ -30,13 +30,6 @@ static KEYWORD_REGEX: Lazy<Regex> =
 
 static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
 
-// TODO: An 'assign' may actually act as an 'append' (or others) e.g.
-//  P = ""
-//  P:a = "append"
-//  Q = "base "
-//  Q:${P} = "OK2"         <-- this is executed second
-//  Q:append = "me first"  <-- this is executed first
-//  OVERRIDES = "a"
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 enum StmtKind {
     WeakDefault,
@@ -1693,6 +1686,19 @@ mod test {
         d.expand_keys().unwrap();
 
         assert_eq!(d.get_var("TEST2"), Some("1".into()));
+    }
+
+    #[test]
+    fn test_wat() {
+        let mut d = DataSmart::new();
+        d.set_var("P", "");
+        d.set_var("P:a", "append");
+        d.set_var("Q", "base ");
+        d.set_var("Q:${P}", "OK2");
+        d.set_var("Q:append", "me first");
+        d.set_var("OVERRIDES", "a");
+
+        assert_eq!(d.get_var("Q").unwrap(), "base me firstOK2");
     }
 }
 
