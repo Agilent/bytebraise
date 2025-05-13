@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
-use std::hash::Hash;
 
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
@@ -327,7 +326,7 @@ impl DataSmart {
         if check_keyword {
             let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
 
-            if let Some(_) = keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
+            if keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())).is_some() {
                 unimplemented!()
             };
         }
@@ -855,14 +854,14 @@ mod test {
         let candidate: Vec<String> = input.chars().map(String::from).collect();
         let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
 
-        eprintln!("{} => {:?}", input, ret);
+        eprintln!("{input} => {ret:?}");
 
         ret
     }
 
     #[test]
     fn none() {
-        let mut d = DataSmart::new();
+        let d = DataSmart::new();
         assert_eq!(d.get_var("NOT_EXIST"), None);
     }
 
