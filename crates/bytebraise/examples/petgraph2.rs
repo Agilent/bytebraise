@@ -222,8 +222,6 @@ impl ExpansionState {
     }
 }
 
-struct OverrideState {}
-
 #[derive(Debug)]
 struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
@@ -535,6 +533,7 @@ impl DataSmart {
             rhs: value,
         }));
 
+        // Lookup variable base (stem) and create if it doesn't exist
         let var_entry = self
             .vars
             .entry(base.to_string())
@@ -643,6 +642,25 @@ impl DataSmart {
         Ok(value)
     }
 
+    pub fn expand_keys(&mut self) -> DataSmartResult<()> {
+        for unexpanded_key in &self.unexpanded_vars {
+            let expanded_key = self.expand(unexpanded_key.0)?;
+
+            if let Some(data) = self.ds.node_weight_mut(*unexpanded_key.1) {
+                // TODO: correct warning message to include values
+                eprintln!("WARNING: Variable key {} replaces original key {}", unexpanded_key.0, expanded_key);
+
+                self.vars.remove(unexpanded_key.0);
+
+                eprintln!("new name: {expanded_key}");
+                data.variable_mut().name = expanded_key.clone();
+                self.vars.insert(expanded_key, *unexpanded_key.1);
+            }
+        }
+
+        Ok(())
+    }
+
     fn compute_overrides(&self) -> DataSmartResult<()> {
         if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
             if RefCell::borrow(&self.active_overrides).is_some() {
@@ -678,8 +696,8 @@ impl DataSmart {
 
         let var_parts = var.split_once(':');
 
-
         // TODO: handle override syntax, e.g. getVar("A:pn-waves")
+        //  All this should have to do (TM) is apply a pre-filter to the variable operations.
         let var_entry = self.vars.get(var)?;
         //println!("{}get_var = {}", " ".repeat(level), var);
 
@@ -1747,6 +1765,7 @@ mod test {
         d.set_var("B", "2");
         d.set_var("A2", "Y");
 
+        d.expand_keys().unwrap();
         assert_eq!(d.get_var("A2"), Some("X".into()));
     }
 
@@ -1755,8 +1774,12 @@ mod test {
         let mut d = DataSmart::new();
 
         d.set_var("TEST${A}", "1");
+        assert_eq!(d.get_var("TEST${A}"), Some("1".into()));
+
         d.set_var("TEST2", "2");
         d.set_var("A", "2");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(d.get_var("TEST2"), Some("1".into()));
     }
