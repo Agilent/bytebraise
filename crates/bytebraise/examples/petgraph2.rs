@@ -13,7 +13,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
+use scopeguard::{ScopeGuard, defer, guard};
 
 use bytebraise::data_smart::errors::{DataSmartError, DataSmartResult};
 use bytebraise::data_smart::utils::{replace_all, split_filter_empty, split_keep};
@@ -353,7 +353,8 @@ impl ResolvedVariableOperation {
 
     fn is_synthesized_operation(&self) -> bool {
         match self.op_type {
-            VariableOperationKind::SynthesizedAppend | VariableOperationKind::SynthesizedPrepend => true,
+            VariableOperationKind::SynthesizedAppend
+            | VariableOperationKind::SynthesizedPrepend => true,
             _ => false,
         }
     }
@@ -593,7 +594,10 @@ impl DataSmart {
 
             if let Some(data) = self.ds.node_weight_mut(*unexpanded_key.1) {
                 // TODO: correct warning message to include values
-                eprintln!("WARNING: Variable key {} replaces original key {}", unexpanded_key.0, expanded_key);
+                eprintln!(
+                    "WARNING: Variable key {} replaces original key {}",
+                    unexpanded_key.0, expanded_key
+                );
 
                 self.vars.remove(unexpanded_key.0);
 
@@ -750,7 +754,8 @@ impl DataSmart {
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
                 a.heap.retain(|item| {
-                    !item.0.is_synthesized_operation() || (item.0.unexpanded_override != b.unexpanded_override)
+                    !item.0.is_synthesized_operation()
+                        || (item.0.unexpanded_override != b.unexpanded_override)
                 });
                 a.push(b);
                 a
@@ -929,9 +934,7 @@ struct StmtNode {
 }
 
 #[derive(Debug)]
-struct UnexpandedStatementNode {
-
-}
+struct UnexpandedStatementNode {}
 
 #[derive(Debug)]
 enum GraphItem {
@@ -974,7 +977,7 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
-    use crate::{score_override, DataSmart};
+    use crate::{DataSmart, score_override};
     use indexmap::IndexSet;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {

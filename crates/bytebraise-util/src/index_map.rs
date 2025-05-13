@@ -1,6 +1,6 @@
 use indexmap::map::IndexMap;
-use std::hash::Hash;
 use itertools::Itertools;
+use std::hash::Hash;
 
 /// Return an `IndexMap` of keys mapped to a list of their corresponding values.
 ///
