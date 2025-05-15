@@ -2,8 +2,8 @@
 name = "bytebraise"
 description = "Proof-of-concept experiment to see how much of BitBake can be implemented in Rust"
 version = "0.1.4"
-edition = "2024"
 
+edition.workspace = true
 homepage.workspace = true
 repository.workspace = true
 authors.workspace = true

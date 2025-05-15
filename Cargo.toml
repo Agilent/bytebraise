@@ -13,3 +13,4 @@ homepage = "https://github.com/Agilent/bytebraise"
 repository = "https://github.com/Agilent/bytebraise"
 authors = ["Chris Laplante <chris.laplante@agilent.com>"]
 license = "GPL-2.0-only"
+edition = "2024"
