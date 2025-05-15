@@ -52,7 +52,7 @@ fn evaluate_assignment_expression(
 ) -> DataSmartResult<()> {
     let ident = expr.left();
     let key = ident.identifier().syntax().text().to_string();
-    let mut varflag_text = ident.varflag().map(|v| v.value().to_string());
+    let varflag_text = ident.varflag().map(|v| v.value().to_string());
     if varflag_text.is_some() {
         unimplemented!();
     }

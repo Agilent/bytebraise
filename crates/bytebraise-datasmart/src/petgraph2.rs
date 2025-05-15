@@ -76,7 +76,7 @@ pub struct DataSmart {
 }
 
 // TODO: better way?
-static EMPTY_OVERRIDES: LazyLock<IndexSet<String>> = LazyLock::new(|| IndexSet::new());
+static EMPTY_OVERRIDES: LazyLock<IndexSet<String>> = LazyLock::new(IndexSet::new);
 
 // TODO: need to support more than 64 overrides?
 fn score_override(
@@ -90,7 +90,7 @@ fn score_override(
         .unwrap_or_else(|| &EMPTY_OVERRIDES);
 
     let c: IndexSet<String> = candidate_overrides.iter().cloned().collect();
-    if !c.is_subset(&temp_cloned_active_overrides) {
+    if !c.is_subset(temp_cloned_active_overrides) {
         return None;
     }
 
@@ -266,6 +266,12 @@ impl Ord for ResolvedVariableOperation {
 impl PartialOrd for ResolvedVariableOperation {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Default for DataSmart {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
