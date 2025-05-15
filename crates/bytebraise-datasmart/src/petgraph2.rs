@@ -22,6 +22,7 @@ Major todos:
 */
 
 use crate::errors::{DataSmartError, DataSmartResult};
+use crate::macros::get_var;
 use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
@@ -40,7 +41,6 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::LazyLock;
-use crate::macros::get_var;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -894,9 +894,9 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
+    use crate::macros::get_var;
     use crate::petgraph2::{DataSmart, score_override};
     use indexmap::IndexSet;
-    use crate::macros::get_var;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
