@@ -66,7 +66,7 @@ impl ExpansionState {
 }
 
 #[derive(Debug)]
-struct DataSmart {
+pub struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     unexpanded_vars: FxHashMap<String, NodeIndex<DefaultIx>>,
@@ -361,6 +361,9 @@ impl DataSmart {
             };
         }
 
+        // TODO: if parsing, and no keyword given, then wipe away removes, prepends, and appends
+        //  Also need to do something with overrides - not sure what though (set setVar())
+
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             lhs: override_str.map(String::from),
             kind: stmt_kind,
@@ -381,6 +384,7 @@ impl DataSmart {
         });
 
         if base.contains("${") {
+            // This is used by `expand_vars`
             self.unexpanded_vars.insert(base.to_string(), *var_entry);
         }
 
@@ -492,6 +496,7 @@ impl DataSmart {
     }
 
     pub fn expand_keys(&mut self) -> DataSmartResult<()> {
+        // TODO: clear `unexpanded_vars`
         for unexpanded_key in &self.unexpanded_vars {
             let expanded_key = self.expand(unexpanded_key.0)?;
 
@@ -585,6 +590,10 @@ impl DataSmart {
                     .unwrap();
 
                 let mut var_op_kind: VariableOperationKind = op.0.op_type.into();
+                // TODO: no_weak_default option
+                // if var_op_kind == VariableOperationKind::WeakDefault {
+                //     return None;
+                // }
 
                 let mut resolved_od = None;
 
@@ -677,6 +686,7 @@ impl DataSmart {
                 item.0.override_score()
             );
         }
+
         eprintln!("=====");
 
         let Some((resolved_start_value, _)) = resolved_variable_operations.heap.first().cloned()

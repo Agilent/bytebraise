@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 anyhow = "1"
 bytebraise-util = { path = "../bytebraise-util", version = "0.1.0" }
+bytebraise-syntax = { path = "../bytebraise-syntax", version = "0.1.0" }
 thiserror = "2"
 petgraph = "0.8.1"
 fxhash = "0.2.1"
