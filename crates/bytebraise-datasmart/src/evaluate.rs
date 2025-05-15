@@ -1,9 +1,9 @@
+use crate::errors::DataSmartResult;
+use crate::petgraph2::DataSmart;
 use bytebraise_syntax::parser::parse_bitbake_from_str;
 use bytebraise_syntax::syntax::ast::AstToken;
 use bytebraise_syntax::syntax::ast::nodes::{Assignment, Root, RootItem};
 use bytebraise_syntax::syntax::syntax_kind::SyntaxKind;
-use crate::errors::DataSmartResult;
-use crate::petgraph2::DataSmart;
 
 pub fn eval<D: AsRef<str>>(data: D) -> DataSmart {
     let data = data.as_ref();
@@ -84,30 +84,34 @@ fn evaluate_assignment_expression(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod test {
     use crate::evaluate::eval;
+    use crate::macros::get_var;
 
     #[test]
     fn test_eval_basic() {
-        let d = eval(r#"
+        let d = eval(
+            r#"
 A = "a"
 B = "c"
-        "#);
+        "#,
+        );
 
-        assert_eq!(d.get_var("A").unwrap(), "a");
+        assert_eq!(get_var!(&d, "A").unwrap(), "a");
     }
 
     #[test]
     fn test_operators() {
-        let d = eval(r#"
+        let d = eval(
+            r#"
 A ?= "a"
 B ?= "c"
 A = "c"
 A:append = "1"
-        "#);
+        "#,
+        );
 
-        assert_eq!(d.get_var("A").unwrap(), "a");
+        assert_eq!(get_var!(&d, "A").unwrap(), "c1");
     }
 }

@@ -33,9 +33,8 @@
 //! ```
 //!
 //! The former uses 'parsing context' whereas the latter does not.
-
-
 pub mod errors;
+pub mod evaluate;
+pub mod macros;
 pub mod petgraph2;
 pub mod variable_operation;
-pub mod evaluate;

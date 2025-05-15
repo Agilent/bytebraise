@@ -21,6 +21,11 @@ Major todos:
     - Variable history
 */
 
+use crate::errors::{DataSmartError, DataSmartResult};
+use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
+use bytebraise_util::fifo_heap::FifoHeap;
+use bytebraise_util::retain_with_index::RetainWithIndex;
+use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -29,18 +34,13 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
+use scopeguard::{ScopeGuard, defer, guard};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::LazyLock;
-
-use crate::errors::{DataSmartError, DataSmartResult};
-use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
-use bytebraise_util::fifo_heap::FifoHeap;
-use bytebraise_util::retain_with_index::RetainWithIndex;
-use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
+use crate::macros::get_var;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -473,7 +473,7 @@ impl DataSmart {
                     }
 
                     Ok(self
-                        .get_var(referenced_var)
+                        .get_var(referenced_var, false)
                         .unwrap_or(match_str.to_string()))
                 },
             )?;
@@ -526,16 +526,18 @@ impl DataSmart {
 
             for i in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s = split_filter_empty(&self.get_var("OVERRIDES").unwrap_or_default(), ":")
-                    .map(String::from)
-                    .collect::<IndexSet<String>>();
+                let s =
+                    split_filter_empty(&self.get_var("OVERRIDES", false).unwrap_or_default(), ":")
+                        .map(String::from)
+                        .collect::<IndexSet<String>>();
 
                 //eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(&self.get_var("OVERRIDES").unwrap_or_default(), ":")
-                    .map(String::from)
-                    .collect::<IndexSet<String>>();
+                let s2 =
+                    split_filter_empty(&self.get_var("OVERRIDES", false).unwrap_or_default(), ":")
+                        .map(String::from)
+                        .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -548,7 +550,7 @@ impl DataSmart {
         Ok(())
     }
 
-    pub fn get_var<S: AsRef<str>>(&self, var: S) -> Option<String> {
+    pub fn get_var<S: AsRef<str>>(&self, var: S, parsing: bool) -> Option<String> {
         let var = var.as_ref();
 
         //let var_parts = var.split_once(':');
@@ -892,8 +894,9 @@ impl GraphItem {
 
 #[cfg(test)]
 mod test {
-    use crate::petgraph2::{score_override, DataSmart};
+    use crate::petgraph2::{DataSmart, score_override};
     use indexmap::IndexSet;
+    use crate::macros::get_var;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
@@ -911,7 +914,7 @@ mod test {
     #[test]
     fn none() {
         let d = DataSmart::new();
-        assert_eq!(d.get_var("NOT_EXIST"), None);
+        assert_eq!(get_var!(&d, "NOT_EXIST"), None);
     }
 
     #[test]
@@ -921,7 +924,7 @@ mod test {
         d.set_var("TEST:append", "2");
         d.set_var("TEST:append", "2");
 
-        assert_eq!(d.get_var("TEST"), Some("122".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("122".into()));
     }
 
     #[test]
@@ -931,7 +934,7 @@ mod test {
         d.set_var("TEST:more", "2");
         d.set_var("TEST:more:specific", "3");
 
-        assert_eq!(d.get_var("TEST"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
@@ -942,7 +945,7 @@ mod test {
         d.set_var("TEST:more:specific", "3");
         d.set_var("OVERRIDES", "more");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -953,7 +956,7 @@ mod test {
         d.set_var("TEST:more:specific", "3");
         d.set_var("OVERRIDES", "more:specific");
 
-        assert_eq!(d.get_var("TEST"), Some("3".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     #[test]
@@ -967,7 +970,7 @@ mod test {
         d.set_var("TEST:more:specific", "4");
         d.set_var("OVERRIDES", "more:specific");
 
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
@@ -981,7 +984,7 @@ mod test {
         d.set_var("TEST:more", "6");
         d.set_var("OVERRIDES", "more");
 
-        assert_eq!(d.get_var("TEST"), Some("6".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("6".into()));
     }
 
     #[test]
@@ -995,7 +998,7 @@ mod test {
         d.set_var("TEST:more", "6");
         d.set_var("OVERRIDES", "");
 
-        assert_eq!(d.get_var("TEST"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
@@ -1004,7 +1007,7 @@ mod test {
         d.set_var("TEST", "1");
         d.set_var("TEST:append", "2");
 
-        assert_eq!(d.get_var("TEST"), Some("12".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
 
     #[test]
@@ -1014,7 +1017,7 @@ mod test {
         d.set_var("TEST", "2");
         d.set_var("TEST:append", "3");
 
-        assert_eq!(d.get_var("TEST"), Some("23".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("23".into()));
     }
 
     #[test]
@@ -1025,7 +1028,7 @@ mod test {
         d.set_var("TEST:append", "3");
         d.set_var("TEST:append", "4");
 
-        assert_eq!(d.get_var("TEST"), Some("234".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("234".into()));
     }
 
     #[test]
@@ -1037,7 +1040,7 @@ mod test {
         d.set_var("TEST:append", "4");
         d.set_var("TEST:append:a", "NO");
 
-        assert_eq!(d.get_var("TEST"), Some("234".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("234".into()));
     }
 
     #[test]
@@ -1050,7 +1053,7 @@ mod test {
         d.set_var("TEST:b:append", "BASE");
         d.set_var("OVERRIDES", "b");
 
-        assert_eq!(d.get_var("TEST"), Some("BASE34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("BASE34".into()));
     }
 
     #[test]
@@ -1064,7 +1067,7 @@ mod test {
         d.set_var("TEST:b", "OH YES");
         d.set_var("OVERRIDES", "b");
 
-        assert_eq!(d.get_var("TEST"), Some("OH YESBASE34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("OH YESBASE34".into()));
     }
 
     #[test]
@@ -1079,7 +1082,7 @@ mod test {
         d.set_var("TEST:c", "WHAT");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("WHAT34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("WHAT34".into()));
     }
 
     #[test]
@@ -1095,7 +1098,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("WHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("WHAT!34".into()));
     }
 
     #[test]
@@ -1112,7 +1115,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("QWHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
     }
 
     #[test]
@@ -1122,7 +1125,7 @@ mod test {
         d.set_var("TEST:append", "3");
         d.set_var("TEST:append", "4");
 
-        assert_eq!(d.get_var("TEST"), Some("1034".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1034".into()));
     }
 
     #[test]
@@ -1134,7 +1137,7 @@ mod test {
         d.set_var("OP", "append");
         d.set_var("OVERRIDES", "a:b");
 
-        assert_eq!(d.get_var("TEST"), Some("firstOPwhy?".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("firstOPwhy?".into()));
     }
 
     #[test]
@@ -1151,7 +1154,7 @@ mod test {
         d.set_var("TEST:c:append", "!");
         d.set_var("OVERRIDES", "b:c:");
 
-        assert_eq!(d.get_var("TEST"), Some("QWHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
     }
 
     #[test]
@@ -1171,7 +1174,7 @@ mod test {
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("5".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
 
     #[test]
@@ -1185,7 +1188,7 @@ mod test {
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("5".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
 
     fn override_priority_order_3() {
@@ -1199,7 +1202,7 @@ mod test {
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("3".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     #[test]
@@ -1209,7 +1212,7 @@ mod test {
         d.set_var("TEST:b:a:append", "2");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1220,7 +1223,7 @@ mod test {
         d.set_var("TEST:a:b:append", "3");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("3".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     #[test]
@@ -1231,7 +1234,7 @@ mod test {
         d.set_var("TEST:b:a:append", "2");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("3".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     #[test]
@@ -1247,7 +1250,7 @@ mod test {
         score("ba");
         score("aba");
 
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
@@ -1257,7 +1260,7 @@ mod test {
         d.set_var("TEST:c:b", "2");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1268,7 +1271,7 @@ mod test {
         d.set_var("TEST:a:b:c", "3");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
 
         let mut d = DataSmart::new();
         d.set_var("TEST", "1");
@@ -1276,7 +1279,7 @@ mod test {
         d.set_var("TEST:c:b:a:b:c", "2");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1287,7 +1290,7 @@ mod test {
         d.set_var("TEST:a:b:c:a", "4");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
 
         let mut d = DataSmart::new();
         d.set_var("TEST", "1");
@@ -1295,7 +1298,7 @@ mod test {
         d.set_var("TEST:a:b:c", "3");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
@@ -1305,7 +1308,7 @@ mod test {
         d.set_var("TEST:append:b:a", "2");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("12".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
 
     #[test]
@@ -1316,7 +1319,7 @@ mod test {
         d.set_var("TEST:append", " 4");
         d.set_var("B", "remove");
 
-        assert_eq!(d.get_var("TEST"), Some("1  3 4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1  3 4".into()));
     }
 
     #[test]
@@ -1329,7 +1332,7 @@ mod test {
         d.set_var("Q", "remove");
 
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:remove");
-        assert_eq!(d.get_var("TEST"), Some("1  3".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1  3".into()));
     }
 
     #[test]
@@ -1345,7 +1348,7 @@ mod test {
         d.set_var("TEST:append", " 5 ");
 
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
-        assert_eq!(d.get_var("TEST"), Some("1 2 3 5  4 ".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1 2 3 5  4 ".into()));
     }
 
     #[test]
@@ -1364,7 +1367,7 @@ mod test {
         d.set_var("OVERRIDES", "b");
 
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
-        assert_eq!(d.get_var("TEST"), Some("OK 5  4 ".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("OK 5  4 ".into()));
     }
 
     #[test]
@@ -1375,7 +1378,7 @@ mod test {
         d.set_var("TEST", "10");
         d.set_var("TEST:append", "1");
         d.set_var("TEST:append", "2");
-        assert_eq!(d.get_var("TEST"), Some("1012".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
 
         // But synthesize appends only take the last one:
         let mut d = DataSmart::new();
@@ -1383,7 +1386,7 @@ mod test {
         d.set_var("TEST:${A}", "1");
         d.set_var("TEST:${A}", "2");
         d.set_var("A", "append");
-        assert_eq!(d.get_var("TEST"), Some("102".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
 
     #[test]
@@ -1391,14 +1394,14 @@ mod test {
         let mut d = DataSmart::new();
         d.set_var("TEST", "base");
         d.plus_equals_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("base 2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("base 2".into()));
     }
 
     #[test]
     fn plus_equals_no_base() {
         let mut d = DataSmart::new();
         d.plus_equals_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some(" 2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some(" 2".into()));
     }
 
     #[test]
@@ -1406,14 +1409,14 @@ mod test {
         let mut d = DataSmart::new();
         d.set_var("TEST", "base");
         d.dot_equals_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("base2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("base2".into()));
     }
 
     #[test]
     fn dot_equals_no_base() {
         let mut d = DataSmart::new();
         d.dot_equals_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1421,14 +1424,14 @@ mod test {
         let mut d = DataSmart::new();
         d.set_var("TEST", "base");
         d.equals_plus_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2 base".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2 base".into()));
     }
 
     #[test]
     fn equals_plus_no_base() {
         let mut d = DataSmart::new();
         d.equals_plus_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2 ".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2 ".into()));
     }
 
     #[test]
@@ -1436,21 +1439,21 @@ mod test {
         let mut d = DataSmart::new();
         d.set_var("TEST", "base");
         d.equals_dot_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2base".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2base".into()));
     }
 
     #[test]
     fn equals_dot_no_base() {
         let mut d = DataSmart::new();
         d.dot_equals_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
     fn weak_default() {
         let mut d = DataSmart::new();
         d.weak_default_var("TEST", "2");
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1459,7 +1462,7 @@ mod test {
         d.weak_default_var("TEST", "2");
         d.weak_default_var("TEST", "3");
         d.weak_default_var("TEST", "4");
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
@@ -1467,12 +1470,12 @@ mod test {
         let mut d = DataSmart::new();
         d.weak_default_var("W", "x");
         d.plus_equals_var("W", "y");
-        assert_eq!(d.get_var("W"), Some(" y".into()));
+        assert_eq!(get_var!(&d, "W"), Some(" y".into()));
 
         let mut d = DataSmart::new();
         d.weak_default_var("W", "x");
         d.set_var("W:append", "y");
-        assert_eq!(d.get_var("W"), Some("xy".into()));
+        assert_eq!(get_var!(&d, "W"), Some("xy".into()));
     }
 
     #[test]
@@ -1484,7 +1487,7 @@ mod test {
         d.weak_default_var("TEST:b", "5");
 
         d.set_var("OVERRIDES", "a:b");
-        assert_eq!(d.get_var("TEST"), Some("4".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
@@ -1496,7 +1499,7 @@ mod test {
         d.weak_default_var("TEST:a", "OK");
         d.set_var("OVERRIDES", "a:b");
 
-        assert_eq!(d.get_var("TEST"), Some("OKwat".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("OKwat".into()));
     }
 
     #[test]
@@ -1510,7 +1513,7 @@ mod test {
         d.plus_equals_var("TEST:a:b", "6");
         d.set_var("OVERRIDES", "a:b");
 
-        assert_eq!(d.get_var("TEST"), Some(" 53".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some(" 53".into()));
     }
 
     #[test]
@@ -1532,7 +1535,7 @@ mod test {
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some(" 5377".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some(" 5377".into()));
     }
 
     #[test]
@@ -1554,7 +1557,7 @@ mod test {
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some(" 537".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some(" 537".into()));
     }
 
     #[test]
@@ -1563,14 +1566,14 @@ mod test {
 
         d.default_var("TEST", "1");
 
-        assert_eq!(d.get_var("TEST"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
 
         let mut d = DataSmart::new();
 
         d.default_var("TEST", "1");
         d.default_var("TEST", "2");
 
-        assert_eq!(d.get_var("TEST"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
@@ -1580,7 +1583,7 @@ mod test {
         d.weak_default_var("TEST", "2");
         d.default_var("TEST", "1");
 
-        assert_eq!(d.get_var("TEST"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
@@ -1591,7 +1594,7 @@ mod test {
         d.default_var("TEST", "1");
         d.set_var("OVERRIDES", "a:b:c");
 
-        assert_eq!(d.get_var("TEST"), Some("2".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
@@ -1603,7 +1606,7 @@ mod test {
         d.set_var("A2", "Y");
 
         d.expand_keys().unwrap();
-        assert_eq!(d.get_var("A2"), Some("X".into()));
+        assert_eq!(get_var!(&d, "A2"), Some("X".into()));
     }
 
     #[test]
@@ -1611,14 +1614,14 @@ mod test {
         let mut d = DataSmart::new();
 
         d.set_var("TEST${A}", "1");
-        assert_eq!(d.get_var("TEST${A}"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST${A}"), Some("1".into()));
 
         d.set_var("TEST2", "2");
         d.set_var("A", "2");
 
         d.expand_keys().unwrap();
 
-        assert_eq!(d.get_var("TEST2"), Some("1".into()));
+        assert_eq!(get_var!(&d, "TEST2"), Some("1".into()));
     }
 
     #[test]
@@ -1631,7 +1634,7 @@ mod test {
         d.set_var("Q:append", "me first");
         d.set_var("OVERRIDES", "a");
 
-        assert_eq!(d.get_var("Q").unwrap(), "base me firstOK2");
+        assert_eq!(get_var!(&d, "Q").unwrap(), "base me firstOK2");
     }
 }
 
@@ -1688,8 +1691,8 @@ fn main() {
     //parse_value("${${M}}");
 
     // println!("\n");
-    // //println!("\nOVERRIDES = {:?}\n", d.get_var("OVERRIDES"));
-    println!("TEST = {:?}\n", d.get_var("TEST"));
+    // //println!("\nOVERRIDES = {:?}\n", get_var(&d, "OVERRIDES"));
+    println!("TEST = {:?}\n", get_var!(&d, "TEST"));
     //
     // println!("{:?}", Dot::with_config(&d.ds, &[]));
 }
