@@ -1211,6 +1211,16 @@ mod test {
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
+    fn override_priority_order_4() {
+        let mut d = DataSmart::new();
+        d.set_var("TEST", "1");
+        d.set_var("TEST:a", "2");
+        d.set_var("TEST:a:a", "3");
+
+        d.set_var("OVERRIDES", "a:b:c");
+
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
+    }
     #[test]
     fn override_selection_order_sensitivity() {
         let mut d = DataSmart::new();
@@ -1642,63 +1652,4 @@ mod test {
 
         assert_eq!(get_var!(&d, "Q").unwrap(), "base me firstOK2");
     }
-}
-
-fn main() {
-    let mut d = DataSmart::new();
-
-    // ABIEXTENSION ??= ""
-    // ABIEXTENSION_class-nativesdk = ""
-    // CLASSOVERRIDE ?= "class-target"
-    // TARGET_OS = "linux${LIBCEXTENSION}${ABIEXTENSION}"
-    // OVERRIDES = "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable"
-
-    /*d.set_var("ABIEXTENSION", "");
-        d.set_var("ABIEXTENSION:class-nativesdk", "wat");
-        d.set_var("CLASSOVERRIDE", "class-nativesdk");
-        d.set_var("TARGET_OS", "linux${LIBCEXTENSION}${ABIEXTENSION}");
-        d.set_var("LIBCEXTENSION", "");
-        d.set_var("LIBCOVERRIDE", "");
-        //d.set_var("TRANSLATED_TARGET_ARCH", "wat");
-        //d.set_var("PN", "waves");
-        //d.set_var("B", "pn-waves");
-        d.set_var("OVERRIDES", "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}${LIBCOVERRIDE}:forcevariable");
-    */
-
-    // d.set_var("TEST", "a b c");
-    // d.set_var("TEST:${A}", "b");
-    // d.set_var("TEST:${P}", "b");
-    // d.set_var("P", "append");
-    // d.set_var("A", "append");
-    // d.set_var("TEST:append", "OK");
-    // d.set_var("TEST:append", "OK");
-    // d.set_var("TEST:prepend", "prep");
-    // d.set_var("TEST:${B}", "crazy");
-    // d.set_var("B", "prepend");
-
-    //d.set_var("TEST:q", "WAT");
-    //d.set_var("OVERRIDES", "q");
-
-    // d.set_var("TEST:${${Q}}", "indirect");
-    // d.set_var("W", "P");
-    // d.set_var("Q", "${W}");
-
-    d.set_var("TEST", "a b c");
-    d.set_var("TEST:q:b", "WAT");
-    d.set_var("TEST:q:b:c:append", "p!");
-    d.set_var("TEST:q:b:c:append", "q");
-    d.set_var("OVERRIDES", "q:b:c");
-
-    //println!(">>>> {:?}", d.expand("TEST:${${Q}}", 1));
-
-    //d.set_var("A:remove:C", "C");
-    //d.set_var("A:${B}", "D");
-
-    //parse_value("${${M}}");
-
-    // println!("\n");
-    // //println!("\nOVERRIDES = {:?}\n", get_var(&d, "OVERRIDES"));
-    println!("TEST = {:?}\n", get_var!(&d, "TEST"));
-    //
-    // println!("{:?}", Dot::with_config(&d.ds, &[]));
 }

@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "crates/bytebraise", "crates/bytebraise-datasmart",
+    "crates/bytebraise", "crates/bytebraise-datasmart", "crates/bytebraise-datasmart-macros",
     "crates/bytebraise-lexer",
     "crates/bytebraise-syntax",
     "crates/bytebraise-util"
 ]
 
 exclude = [ "/.idea" ]
+resolver = "3"
 
 [workspace.package]
 homepage = "https://github.com/Agilent/bytebraise"
