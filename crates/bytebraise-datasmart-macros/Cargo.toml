@@ -1,0 +1,15 @@
+[package]
+name = "bytebraise-datasmart-macros"
+version = "0.1.0"
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1"
+syn = "2"
