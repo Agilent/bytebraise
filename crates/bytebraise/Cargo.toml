@@ -18,7 +18,7 @@ indexmap = "2"
 lazy_static = "1"
 once_cell = "1"
 paste = "1"
-regex = { version = "1", features = ["pattern"] }
+regex = { version = "1" }
 scopeguard = "1"
 
 pyo3 = { version = "0.19.2", features = ["auto-initialize", "anyhow"], optional = true }

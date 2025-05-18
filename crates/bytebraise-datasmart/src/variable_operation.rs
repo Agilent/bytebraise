@@ -120,6 +120,14 @@ impl VariableOperationKind {
             VariableOperationKind::Remove => 8,
         }
     }
+
+    pub(crate) fn is_synthesized_operation(&self) -> bool {
+        match self {
+            VariableOperationKind::SynthesizedAppend
+            | VariableOperationKind::SynthesizedPrepend => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]

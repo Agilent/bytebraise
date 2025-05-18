@@ -2,10 +2,10 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
-use bytebraise_syntax::parser::parse_bitbake_from_str;
-use clap::Parser;
 use bytebraise_datasmart::evaluate::Evaluate;
 use bytebraise_datasmart::petgraph2::DataSmart;
+use bytebraise_syntax::parser::parse_bitbake_from_str;
+use clap::Parser;
 
 #[derive(Parser)]
 struct Opts {
