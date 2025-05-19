@@ -68,12 +68,13 @@ impl ExpansionState {
 pub struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
-    unexpanded_vars: FxHashMap<String, NodeIndex<DefaultIx>>,
+    // TODO new type
+    unexpanded_statements: Vec<(String, StmtKind, String)>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
 }
-//
+
 // fn score_overrides2(
 //     active_overrides: impl IntoIterator<Item = String>,
 //     candidate_overrides: &Vec<String>,
@@ -328,7 +329,7 @@ impl DataSmart {
         DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
-            unexpanded_vars: FxHashMap::default(),
+            unexpanded_statements: Vec::new(),
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
@@ -400,6 +401,12 @@ impl DataSmart {
         let var = var.into();
         let value = value.into();
 
+        dbg!(&var, &value);
+
+        if var.contains("${") {
+            self.unexpanded_statements.push((var.clone(), stmt_kind, value.clone()));
+        }
+
         let var_parts = var.split_once(':');
         let base = var_parts.map_or(var.as_str(), |parts| parts.0);
         let override_str = var_parts.map(|parts| parts.1);
@@ -436,11 +443,6 @@ impl DataSmart {
             op_type: stmt_kind,
             idx: stmt_idx,
         });
-
-        if base.contains("${") {
-            // This is used by `expand_vars`
-            self.unexpanded_vars.insert(base.to_string(), *var_entry);
-        }
 
         self.ds.add_edge(*var_entry, stmt_idx, ());
     }
@@ -550,23 +552,17 @@ impl DataSmart {
     }
 
     pub fn expand_keys(&mut self) -> DataSmartResult<()> {
-        // TODO: clear `unexpanded_vars`
-        for unexpanded_key in &self.unexpanded_vars {
-            let expanded_key = self.expand(unexpanded_key.0)?;
+        let mut statements = std::mem::take(&mut self.unexpanded_statements);
 
-            if let Some(data) = self.ds.node_weight_mut(*unexpanded_key.1) {
-                // TODO: correct warning message to include values
-                eprintln!(
-                    "WARNING: Variable key {} replaces original key {}",
-                    unexpanded_key.0, expanded_key
-                );
+        for (key, stmt, value) in statements.drain(..) {
+            let expanded_key = self.expand(&key)?;
+            // TODO: correct warning message to include values
+            eprintln!(
+                "WARNING: Variable key {} replaces original key {}",
+                expanded_key, key
+            );
 
-                self.vars.remove(unexpanded_key.0);
-
-                eprintln!("new name: {expanded_key}");
-                data.variable_mut().name = expanded_key.clone();
-                self.vars.insert(expanded_key, *unexpanded_key.1);
-            }
+            self.set_var(expanded_key, value);
         }
 
         Ok(())
@@ -663,6 +659,9 @@ impl DataSmart {
                     .map(|s| self.expand(s))
                     .transpose()
                     .unwrap();
+                if original_override.contains("$") {
+                    return None;
+                }
 
                 // TODO: no_weak_default option
                 // if var_op_kind == VariableOperationKind::WeakDefault {
@@ -790,7 +789,7 @@ impl DataSmart {
                 a
             });
 
-        dbg!(&resolved_variable_operations);
+        //dbg!(&resolved_variable_operations);
 
         // eprintln!("SCORING: ");
         // for item in resolved_variable_operations.heap.iter() {
@@ -853,16 +852,17 @@ impl DataSmart {
             }),
         };
 
-        eprintln!(
-            "start value = {:?} @ score: {:?} with LHS: {:?}",
-            ret,
-            resolved_start_value.override_score(),
-            resolved_start_value.override_lhs()
-        );
+        // eprintln!(
+        //     "start value = {:?} @ score: {:?} with LHS: {:?}",
+        //     ret,
+        //     resolved_start_value.override_score(),
+        //     resolved_start_value.override_lhs()
+        // );
+
         resolved_variable_operations
             .heap
             .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
-        eprintln!("before filter: {resolved_variable_operations:#?}");
+        //eprintln!("before filter: {resolved_variable_operations:#?}");
 
         // TODO: just filter in loop below
         resolved_variable_operations.heap.retain(|(op, _)| {
@@ -872,7 +872,7 @@ impl DataSmart {
                         || op.override_lhs().is_empty()))
         });
 
-        eprintln!("{resolved_variable_operations:#?}");
+        //eprintln!("{resolved_variable_operations:#?}");
 
         let rhs_filter: IndexSet<String> = resolved_start_value
             .overrides_data
@@ -1111,7 +1111,7 @@ A .= "5"
     fn override_score_4() {
         let mut d = DataSmart::new();
         d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
+        d.set_var("TEST:more:append", "2");
 
         // All applicable overrides (at the same score level) are applied.
         d.set_var("TEST:more:specific", "3");
@@ -1284,6 +1284,8 @@ A .= "5"
         d.set_var("TEST:a:b:${OP}", "OP");
         d.set_var("OP", "append");
         d.set_var("OVERRIDES", "a:b");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some("firstOPwhy?".into()));
     }
@@ -1477,6 +1479,8 @@ A .= "5"
         d.set_var("TEST:append", " 4");
         d.set_var("B", "remove");
 
+        d.expand_keys().unwrap();
+
         assert_eq!(get_var!(&d, "TEST"), Some("1  3 4".into()));
     }
 
@@ -1488,6 +1492,8 @@ A .= "5"
         d.set_var("B", "${W}");
         d.set_var("W", "Q");
         d.set_var("Q", "remove");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:remove");
         assert_eq!(get_var!(&d, "TEST"), Some("1  3".into()));
@@ -1504,6 +1510,8 @@ A .= "5"
         d.set_var("Q", "append");
 
         d.set_var("TEST:append", " 5 ");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
         assert_eq!(get_var!(&d, "TEST"), Some("1 2 3 5  4 ".into()));
@@ -1524,8 +1532,26 @@ A .= "5"
         d.set_var("TEST:b:append", "OK");
         d.set_var("OVERRIDES", "b");
 
+        d.expand_keys().unwrap();
+
         assert_eq!(d.expand("TEST:${${B}}").unwrap(), "TEST:append");
         assert_eq!(get_var!(&d, "TEST"), Some("OK 5  4 ".into()));
+    }
+
+    #[test]
+    fn dumb() {
+        let mut d = eval(r#"
+TEST = "base"
+TEST:append = "1"
+TEST${B} = " wat"
+TEST:append = "2"
+
+B = ":append"
+
+        "#);
+
+        d.expand_keys().unwrap();
+        assert_eq!(get_var!(&d, "TEST").unwrap(), "base12 wat");
     }
 
     #[test]
@@ -1538,12 +1564,13 @@ A .= "5"
         d.set_var("TEST:append", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
 
-        // But synthesize appends only take the last one:
+        // But synthesized appends only take the last one:
         let mut d = DataSmart::new();
         d.set_var("TEST", "10");
         d.set_var("TEST:${A}", "1");
         d.set_var("TEST:${A}", "2");
         d.set_var("A", "append");
+        d.expand_keys().unwrap();
         assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
 
@@ -1693,6 +1720,8 @@ A .= "5"
 
         d.set_var("OVERRIDES", "a:b:c");
 
+        d.expand_keys().unwrap();
+
         assert_eq!(get_var!(&d, "TEST"), Some(" 5377".into()));
     }
 
@@ -1714,6 +1743,8 @@ A .= "5"
         d.set_var("TEST:${A}:b:a:${OP}", "7");
 
         d.set_var("OVERRIDES", "a:b:c");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some(" 537".into()));
     }
@@ -1799,6 +1830,8 @@ A .= "5"
         d.set_var("Q:${P}", "OK2");
         d.set_var("Q:append", "me first");
         d.set_var("OVERRIDES", "a");
+
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "Q").unwrap(), "base me firstOK2");
     }
@@ -1907,6 +1940,9 @@ A .= "5"
         d.set_var("Q:${IN}", "t");
         d.set_var("IN", "please");
         //assert_eq!(get_var!(&d, "Q").unwrap(), "q");
+
+        d.expand_keys().unwrap();
+
         assert_eq!(get_var!(&d, "Q:please").unwrap(), "t");
     }
 
