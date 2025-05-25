@@ -29,8 +29,8 @@ use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
 use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
-use fxhash::{FxHashMap, FxHashSet};
-use indexmap::{IndexMap, IndexSet};
+use fxhash::FxHashMap;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
@@ -42,7 +42,7 @@ use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::LazyLock;
 
@@ -229,12 +229,12 @@ fn split_overrides_without_keywords<S: AsRef<str>>(input: S) -> Vec<String> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum StatementOverrides {
     Operation {
-        lhs: Vec<String>,
-        rhs: IndexSet<String>,
+        scope: Vec<String>,
+        filter: IndexSet<String>,
         // TODO: move operation type into here?
     },
     PureOverride {
-        overrides: Vec<String>,
+        scope: Vec<String>,
     },
 }
 
@@ -245,23 +245,25 @@ impl StatementOverrides {
         active_overrides: &Option<IndexSet<String>>,
     ) -> bool {
         match self {
-            Self::Operation { rhs, lhs } => {
+            Self::Operation { filter, scope } => {
                 // For scope, consider selection context (active set + direct variant lookup)
                 let lhs_valid = override_selection_context.as_ref().is_none_or(|o2| {
-                    let lhs: IndexSet<String> = lhs.iter().cloned().collect();
+                    let lhs: IndexSet<String> = scope.iter().cloned().collect();
                     lhs.is_subset(o2)
                 });
 
                 // For filter, consider active override set
-                let rhs_valid = active_overrides.as_ref().is_none_or(|o| rhs.is_subset(o));
+                let rhs_valid = active_overrides
+                    .as_ref()
+                    .is_none_or(|o| filter.is_subset(o));
 
                 rhs_valid && lhs_valid
             }
-            Self::PureOverride { overrides } => {
+            Self::PureOverride { scope } => {
                 override_selection_context
                     .as_ref()
                     .is_none_or(|active_overrides| {
-                        let overrides: IndexSet<String> = overrides.iter().cloned().collect();
+                        let overrides: IndexSet<String> = scope.iter().cloned().collect();
                         overrides.is_subset(active_overrides)
                     })
             }
@@ -269,73 +271,68 @@ impl StatementOverrides {
     }
 
     fn score(&self, active_overrides: &Option<IndexSet<String>>) -> Option<OverrideScore> {
+        // The score is derived from the scope alone
         match self {
-            Self::Operation { lhs, .. } => score_override(active_overrides, lhs),
-            Self::PureOverride { overrides } => score_override(active_overrides, overrides),
-        }
-    }
-
-    fn score_and_check_active(&self, active_overrides: &Option<IndexSet<String>>) {}
-
-    fn is_override_operation(&self) -> bool {
-        match self {
-            Self::Operation { .. } => true,
-            Self::PureOverride { .. } => false,
-        }
-    }
-
-    // TODO: better name
-    fn override_lhs(&self) -> Vec<String> {
-        match self {
-            Self::Operation { lhs, .. } => lhs.clone(),
-            Self::PureOverride { overrides } => overrides.clone(),
+            Self::Operation { scope, .. } => score_override(active_overrides, scope),
+            Self::PureOverride { scope } => score_override(active_overrides, scope),
         }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct ResolvedVariableOperation {
-    // TODO: would be better to just have &StmtNode?
-    overrides_data: Option<(StatementOverrides, OverrideScore)>,
-    stmt_kind: StmtKind,
-    value: String,
-    stmt_index: NodeIndex,
+enum ResolvedStatementKind {
+    Operation {
+        scope: Vec<String>,
+        filter: IndexSet<String>,
+        score: OverrideScore,
+    },
+    PureOverride {
+        scope: Vec<String>,
+        score: OverrideScore,
+    },
+    Unconditional,
 }
 
-impl ResolvedVariableOperation {
+impl ResolvedStatementKind {
     fn override_score(&self) -> OverrideScore {
-        match &self.overrides_data {
-            // TODO: revisit None?
-            None => (vec![], 0, 0),
-            Some((_, score)) => score.clone(),
+        match self {
+            Self::Unconditional => (vec![], 0, 0),
+            Self::Operation { score, .. } => score.clone(),
+            Self::PureOverride { score, .. } => score.clone(),
+        }
+    }
+
+    fn override_scope(&self) -> Vec<String> {
+        match self {
+            Self::Unconditional => vec![],
+            Self::Operation { scope, .. } => scope.clone(),
+            Self::PureOverride { scope, .. } => scope.clone(),
         }
     }
 
     fn is_override_operation(&self) -> bool {
-        self.overrides_data
-            .as_ref()
-            .map(|o| o.0.is_override_operation())
-            .unwrap_or_default()
-    }
-
-    fn override_lhs(&self) -> Vec<String> {
-        self.overrides_data
-            .as_ref()
-            .map(|o| o.0.override_lhs())
-            .unwrap_or_default()
+        matches!(self, Self::Operation { .. })
     }
 }
 
-impl Ord for ResolvedVariableOperation {
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ResolvedVariableOperation<'a> {
+    kind: ResolvedStatementKind,
+    stmt: &'a StmtNode,
+    stmt_index: NodeIndex,
+}
+
+impl<'a> Ord for ResolvedVariableOperation<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.override_score()
-            .cmp(&other.override_score())
+        self.kind
+            .override_score()
+            .cmp(&other.kind.override_score())
             .reverse()
-            .then(self.stmt_kind.cmp(&other.stmt_kind))
+            .then(self.stmt.kind.cmp(&other.stmt.kind))
     }
 }
 
-impl PartialOrd for ResolvedVariableOperation {
+impl<'a> PartialOrd for ResolvedVariableOperation<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -459,21 +456,19 @@ impl DataSmart {
                     _ => unreachable!(),
                 };
 
-                // TODO: terminology
                 // Overrides before the keyword - unconditionally applied, depending on the
                 // start value that is selected
-                let override_lhs = split_overrides(&override_str[0..keyword_pos.0]);
-                debug_assert!(!override_lhs.iter().any(|o| match o.as_str() {
+                let override_scope = split_overrides(&override_str[0..keyword_pos.0]);
+                debug_assert!(!override_scope.iter().any(|o| match o.as_str() {
                     "append" => true,
                     "prepend" => true,
                     "remove" => true,
                     _ => false,
                 }));
 
-                // TODO: terminology
                 // Overrides after the keyword - conditionally applied
-                let override_rhs = split_overrides(&override_str[keyword_pos.1..]);
-                debug_assert!(!override_rhs.iter().any(|o| match o.as_str() {
+                let override_filter = split_overrides(&override_str[keyword_pos.1..]);
+                debug_assert!(!override_filter.iter().any(|o| match o.as_str() {
                     "append" => true,
                     "prepend" => true,
                     "remove" => true,
@@ -481,12 +476,12 @@ impl DataSmart {
                 }));
 
                 overrides_data = Some(StatementOverrides::Operation {
-                    lhs: override_lhs,
-                    rhs: IndexSet::from_iter(override_rhs.into_iter()),
+                    scope: override_scope,
+                    filter: IndexSet::from_iter(override_filter.into_iter()),
                 });
             } else {
                 let overrides = split_overrides(override_str);
-                overrides_data = Some(StatementOverrides::PureOverride { overrides });
+                overrides_data = Some(StatementOverrides::PureOverride { scope: overrides });
             }
         }
 
@@ -998,32 +993,45 @@ impl DataSmart {
                     }
                 }
 
-                let mut resolved_od = None;
-                if let Some(overrides) = statement.overrides_data.as_ref() {
-                    // TODO: combine override scoring with filtering for clarity and to eliminate
-                    //  duplicated work (both this step and the is_active check later do subset
-                    //  checking).
-                    let Some(score) = overrides.score(&override_selection_context) else {
-                        // Overrides not active - reject
-                        dbg!(&statement);
-                        dbg!(&override_selection_context);
-                        return None;
-                    };
+                let resolved_stmt_kind = {
+                    match statement.overrides_data.as_ref() {
+                        Some(o @ StatementOverrides::Operation { scope, filter }) => {
+                            if !o.is_active(&override_selection_context, override_state) {
+                                return None;
+                            }
 
-                    resolved_od = Some((overrides.clone(), score));
-                }
+                            let score = o.score(&override_selection_context);
+                            ResolvedStatementKind::Operation {
+                                scope: scope.clone(),
+                                filter: filter.clone(),
+                                score: score.unwrap(),
+                            }
+                        }
+                        Some(o @ StatementOverrides::PureOverride { scope: overrides }) => {
+                            if !o.is_active(&override_selection_context, override_state) {
+                                return None;
+                            }
+
+                            let score = o.score(&override_selection_context);
+                            ResolvedStatementKind::PureOverride {
+                                scope: overrides.clone(),
+                                score: score.unwrap(),
+                            }
+                        }
+                        None => ResolvedStatementKind::Unconditional,
+                    }
+                };
 
                 let ret = ResolvedVariableOperation {
-                    stmt_kind: statement.kind,
-                    value: statement.rhs.clone(),
                     stmt_index: op.idx,
-                    overrides_data: resolved_od,
+                    kind: resolved_stmt_kind,
+                    stmt: statement,
                 };
 
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
-            .filter(|o| match (parsing, o.stmt_kind) {
+            .filter(|o| match (parsing, o.stmt.kind) {
                 (true, StmtKind::Append | StmtKind::Prepend | StmtKind::Remove) => false,
                 _ => true,
             })
@@ -1084,12 +1092,12 @@ impl DataSmart {
             }
         }
 
-        let mut ret = match resolved_start_value.stmt_kind {
-            StmtKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.value.clone()),
-            _ => RetValue::Eager(match resolved_start_value.stmt_kind {
-                StmtKind::PlusEqual => format!(" {}", resolved_start_value.value),
-                StmtKind::EqualPlus => format!("{} ", resolved_start_value.value),
-                _ => resolved_start_value.value.clone(),
+        let mut ret = match resolved_start_value.stmt.kind {
+            StmtKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.stmt.rhs.clone()),
+            _ => RetValue::Eager(match resolved_start_value.stmt.kind {
+                StmtKind::PlusEqual => format!(" {}", resolved_start_value.stmt.rhs),
+                StmtKind::EqualPlus => format!("{} ", resolved_start_value.stmt.rhs),
+                _ => resolved_start_value.stmt.rhs.clone(),
             }),
         };
 
@@ -1106,72 +1114,59 @@ impl DataSmart {
             op.stmt_index != resolved_start_value.stmt_index
                 // Handle override scoring + LHS
                 // TODO: clarify
-                && (op.override_score() >= resolved_start_value.override_score()
-                    || (op.is_override_operation()
-                        && (op.override_lhs() == resolved_start_value.override_lhs()
-                            || op.override_lhs().is_empty())))
+                && (op.kind.override_score() >= resolved_start_value.kind.override_score()
+                    || (op.kind.is_override_operation()
+                        && (op.kind.override_scope() == resolved_start_value.kind.override_scope()
+                            || op.kind.override_scope().is_empty())))
         });
 
         for op in resolved_variable_operations {
-            //dbg!(&op.overrides_data);
-            if op
-                .overrides_data
-                .as_ref()
-                .is_some_and(|od| !od.0.is_active(&override_selection_context, override_state))
-            {
-                dbg!(&override_selection_context);
-                dbg!(&override_state);
-                eprintln!("skip: {:#?}", &op);
-                //dbg!(&override_state_filtered);
-                continue;
-            }
-
-            match op.stmt_kind {
+            match op.stmt.kind {
                 // Weak default is handled the same as assign - priority selection happened above
                 StmtKind::Assign => {
-                    ret = RetValue::Eager(op.value.clone());
+                    ret = RetValue::Eager(op.stmt.rhs.clone());
                 }
                 StmtKind::WeakDefault => {
                     if !matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::WeakDefault(op.value.clone());
+                        ret = RetValue::WeakDefault(op.stmt.rhs.clone());
                     }
                 }
                 StmtKind::Remove if !parsing => {
                     // TODO: aggregate all removes and do it in one shot?
                     let mut removes: HashSet<String> = HashSet::new();
-                    removes.insert(op.value.clone());
+                    removes.insert(op.stmt.rhs.clone());
                     let new_ret = self.apply_removes(&ret.into(), &removes);
                     ret = RetValue::Eager(new_ret);
                 }
                 StmtKind::Append if !parsing => {
-                    ret = RetValue::Eager(ret.to_string() + &op.value);
+                    ret = RetValue::Eager(ret.to_string() + &op.stmt.rhs);
                 }
                 StmtKind::DotEqual => {
                     if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(ret.to_string() + &op.value);
+                        ret = RetValue::Eager(ret.to_string() + &op.stmt.rhs);
                     }
                 }
                 StmtKind::Prepend if !parsing => {
-                    ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
+                    ret = RetValue::Eager(format!("{}{}", op.stmt.rhs, ret.as_ref()));
                 }
                 StmtKind::EqualDot => {
                     if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
+                        ret = RetValue::Eager(format!("{}{}", op.stmt.rhs, ret.as_ref()));
                     }
                 }
                 StmtKind::PlusEqual => {
                     if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.value));
+                        ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.stmt.rhs));
                     }
                 }
                 StmtKind::EqualPlus => {
                     if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(format!("{} {}", op.value, ret.as_ref()));
+                        ret = RetValue::Eager(format!("{} {}", op.stmt.rhs, ret.as_ref()));
                     }
                 }
                 StmtKind::Default => {
                     if matches!(ret, RetValue::WeakDefault(_)) {
-                        ret = RetValue::Default(op.value.clone())
+                        ret = RetValue::Default(op.stmt.rhs.clone())
                     }
                 }
                 _ => {
@@ -1210,7 +1205,7 @@ struct Variable {
     varflags: BTreeMap<String, FifoHeap<VariableOperation>>, // TODO: iterative cache for OVERRIDES
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct StmtNode {
     kind: StmtKind,
 
