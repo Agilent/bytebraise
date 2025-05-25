@@ -642,11 +642,11 @@ impl DataSmart {
             }
 
             let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
-            var_node.operations.heap.retain(|op| {
-                if stmts.contains(&op.0.idx) {
-                    eprintln!("delete {:?}", &op.0.idx);
+            var_node.operations.retain(|op| {
+                if stmts.contains(&op.idx) {
+                    eprintln!("delete {:?}", &op.idx);
                 }
-                return !stmts.contains(&op.0.idx);
+                return !stmts.contains(&op.idx);
             });
 
             if var_node.operations.is_empty() {
@@ -739,7 +739,7 @@ impl DataSmart {
         if new_var_index != old_var_index {
             let mut old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
 
-            for (op, _) in old_var_node.operations.clone().heap.into_iter() {
+            for op in old_var_node.operations.clone().into_iter() {
                 match op.op_type {
                     StmtKind::Append | StmtKind::Prepend | StmtKind::Remove => {
                         self.ds.add_edge(new_var_index, op.idx, ());
@@ -846,6 +846,7 @@ impl DataSmart {
                 kind = Some(UnexpandedOperationKind::Variable);
             }
 
+            // TODO: use overrides_data, not override_str. Then get rid of the latter.
             if let Some(b) = nodes.1.statement().override_str.clone() {
                 // TODO: more efficient
                 let overrides = split_overrides_without_keywords(&b);
@@ -969,18 +970,12 @@ impl DataSmart {
             true => override_state.clone(),
         };
 
-        if var != "OVERRIDES" {
-            //eprintln!("operations for var {var}:");
-            //dbg!(&var_data.operations);
-        }
-
         // Calculate override scores for operations
         let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
             .operations
-            .heap
             .iter()
             .filter_map(|op| {
-                let statement = self.ds.node_weight(op.0.idx).unwrap().statement();
+                let statement = self.ds.node_weight(op.idx).unwrap().statement();
 
                 let original_override = statement.override_str.clone();
                 // if original_override.contains("$") {
@@ -1021,7 +1016,7 @@ impl DataSmart {
                 let ret = ResolvedVariableOperation {
                     stmt_kind: statement.kind,
                     value: statement.rhs.clone(),
-                    stmt_index: op.0.idx,
+                    stmt_index: op.idx,
                     overrides_data: resolved_od,
                 };
 
@@ -1052,8 +1047,7 @@ impl DataSmart {
         //
         // eprintln!("=====");
 
-        let Some((resolved_start_value, _)) = resolved_variable_operations.heap.first().cloned()
-        else {
+        let Some(resolved_start_value) = resolved_variable_operations.first().cloned() else {
             return None;
         };
 
@@ -1107,7 +1101,7 @@ impl DataSmart {
         // );
 
         // TODO: filter in loop below?
-        resolved_variable_operations.heap.retain(|(op, _)| {
+        resolved_variable_operations.retain(|op| {
             // Remove the variable operation that we used for the start value, so we don't double apply
             op.stmt_index != resolved_start_value.stmt_index
                 // Handle override scoring + LHS
@@ -1118,7 +1112,7 @@ impl DataSmart {
                             || op.override_lhs().is_empty())))
         });
 
-        for (op, _) in &resolved_variable_operations.heap {
+        for op in resolved_variable_operations {
             //dbg!(&op.overrides_data);
             if op
                 .overrides_data
