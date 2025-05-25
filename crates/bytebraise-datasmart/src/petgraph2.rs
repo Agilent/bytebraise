@@ -350,7 +350,7 @@ impl DataSmart {
         }
     }
 
-    fn apply_removes(&self, input: &String, removes: &HashSet<String>) -> String {
+    fn apply_removes(&self, input: &str, removes: &HashSet<String>) -> String {
         // TODO only only content flag and if not parsing
         let mut expanded_removes = HashMap::new();
         for r in removes.iter() {
@@ -831,7 +831,7 @@ impl DataSmart {
     }
 
     fn compute_overrides(&self) -> DataSmartResult<()> {
-        if let Ok(_) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
+        if let Ok(_guard) = RefCell::try_borrow_mut(&self.inside_compute_overrides) {
             if RefCell::borrow(&self.active_overrides).is_some() {
                 return Ok(());
             }
@@ -1081,7 +1081,7 @@ impl DataSmart {
                     // TODO: aggregate all removes and do it in one shot?
                     let mut removes: HashSet<String> = HashSet::new();
                     removes.insert(op.stmt.rhs.clone());
-                    let new_ret = self.apply_removes(&ret.into(), &removes);
+                    let new_ret = self.apply_removes(ret.as_ref(), &removes);
                     ret = RetValue::Eager(new_ret);
                 }
                 StmtKind::Append if !parsing => {
