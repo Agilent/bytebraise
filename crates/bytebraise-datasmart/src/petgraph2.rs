@@ -35,7 +35,6 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
-use petgraph::matrix_graph::Nullable;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::{DefaultIx, EdgeIndex};
 use regex::{Captures, Regex};
@@ -798,20 +797,6 @@ impl DataSmart {
 
         let mut operations = BTreeMap::new();
 
-        #[derive(Debug)]
-        struct Operation {
-            kind: UnexpandedOperationKind,
-            stmt_index: NodeIndex<DefaultIx>,
-            var_index: NodeIndex<DefaultIx>,
-        }
-
-        #[derive(Debug)]
-        enum UnexpandedOperationKind {
-            Variable,
-            Override,
-            Both,
-        }
-
         // TODO: if not all 'override' operations, then need to actually do renameKey?
 
         // Reconstruct the unexpanded keys
@@ -819,11 +804,7 @@ impl DataSmart {
             let node = self.ds.edge_endpoints(edge).unwrap();
             let nodes = self.ds.index_twice_mut(node.0, node.1);
 
-            let mut kind = None;
             let mut name = nodes.0.variable().name.clone();
-            if name.contains("${") {
-                kind = Some(UnexpandedOperationKind::Variable);
-            }
 
             // TODO: use overrides_data, not override_str. Then get rid of the latter.
             if let Some(b) = nodes.1.statement().override_str.clone() {
@@ -832,14 +813,6 @@ impl DataSmart {
                 if !overrides.is_empty() {
                     name.push(':');
                     name.push_str(&overrides.join(":"));
-                }
-
-                if b.contains("${") {
-                    if matches!(kind, Some(UnexpandedOperationKind::Variable)) {
-                        kind = Some(UnexpandedOperationKind::Both);
-                    } else {
-                        kind = Some(UnexpandedOperationKind::Override);
-                    }
                 }
             }
 

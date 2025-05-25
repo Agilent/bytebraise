@@ -234,11 +234,8 @@ impl AstNode for Directive {
         Self: Sized,
     {
         use SyntaxKind::*;
-        match kind {
-            AddHandlerNode | AddTaskNode | DelTaskNode | UnsetNode | InheritNode | IncludeNode
-            | RequireNode | ExportNode | ExportFunctionsNode => true,
-            _ => false,
-        }
+        matches!(kind, AddHandlerNode | AddTaskNode | DelTaskNode | UnsetNode | InheritNode | IncludeNode
+           | RequireNode | ExportNode | ExportFunctionsNode)
     }
 
     fn cast(syntax: SyntaxNode) -> Option<Self>

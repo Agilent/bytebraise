@@ -50,7 +50,7 @@ impl<T: Ord> FifoHeap<T> {
 impl<T: Ord> FifoHeap<T> {
     pub fn remove(&mut self, value: &T) {
         // TODO: more efficient
-        self.heap.retain(|(a, b)| a != value)
+        self.heap.retain(|(a, _b)| a != value)
     }
 }
 

@@ -375,10 +375,7 @@ fn scan_unquoted_value(first_char: UnquotedValueFirstChar, m: &mut Muncher) -> T
 }
 
 pub fn is_space_or_tab(c: char) -> bool {
-    match c {
-        ' ' | '\t' => true,
-        _ => false,
-    }
+    matches!(c, ' ' | '\t')
 }
 
 #[derive(Debug, PartialEq, Eq)]
