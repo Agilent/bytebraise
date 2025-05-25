@@ -1,5 +1,4 @@
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {

@@ -191,7 +191,7 @@ fn score_override(
                     assert_eq!(ret.2, 0);
                     ret.2 = ai + 1;
                     break 'outer;
-                } else if candidate.len() > 1 && candidate.ends_with(&[active_override.clone()]) {
+                } else if candidate.len() > 1 && candidate.ends_with(std::slice::from_ref(active_override)) {
                     let old = candidate.clone();
                     //eprintln!("{:?}", candidate);
                     candidate.retain_with_index(|c, i| i == 0 || c != active_override);
@@ -217,12 +217,7 @@ fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
 fn split_overrides_without_keywords<S: AsRef<str>>(input: S) -> Vec<String> {
     split_overrides(input)
         .into_iter()
-        .filter(|o| match o.as_str() {
-            "append" => false,
-            "prepend" => false,
-            "remove" => false,
-            _ => true,
-        })
+        .filter(|o| !matches!(o.as_str(), "append" | "prepend" | "remove"))
         .collect()
 }
 
@@ -459,21 +454,11 @@ impl DataSmart {
                 // Overrides before the keyword - unconditionally applied, depending on the
                 // start value that is selected
                 let override_scope = split_overrides(&override_str[0..keyword_pos.0]);
-                debug_assert!(!override_scope.iter().any(|o| match o.as_str() {
-                    "append" => true,
-                    "prepend" => true,
-                    "remove" => true,
-                    _ => false,
-                }));
+                debug_assert!(!override_scope.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")));
 
                 // Overrides after the keyword - conditionally applied
                 let override_filter = split_overrides(&override_str[keyword_pos.1..]);
-                debug_assert!(!override_filter.iter().any(|o| match o.as_str() {
-                    "append" => true,
-                    "prepend" => true,
-                    "remove" => true,
-                    _ => false,
-                }));
+                debug_assert!(!override_filter.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")));
 
                 overrides_data = Some(StatementOverrides::Operation {
                     scope: override_scope,
@@ -878,7 +863,7 @@ impl DataSmart {
                 return Ok(());
             }
 
-            for i in 0..5 {
+            for _ in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
                 let s = split_filter_empty(
                     &self.get_var("OVERRIDES", false, true).unwrap_or_default(),
@@ -920,12 +905,7 @@ impl DataSmart {
         let var_suffix = split_overrides(var_suffix.unwrap_or_default());
         // If an override-style operator is present, then it will never match so return None
         // TODO: what if someone adds one to OVERRIDES?
-        if var_suffix.iter().any(|o| match o.as_str() {
-            "append" => true,
-            "prepend" => true,
-            "remove" => true,
-            _ => false,
-        }) {
+        if var_suffix.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")) {
             return None;
         }
 
@@ -1029,10 +1009,7 @@ impl DataSmart {
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
-            .filter(|o| match (parsing, o.stmt.kind) {
-                (true, StmtKind::Append | StmtKind::Prepend | StmtKind::Remove) => false,
-                _ => true,
-            })
+            .filter(|o| !matches!((parsing, o.stmt.kind), (true, StmtKind::Append | StmtKind::Prepend | StmtKind::Remove)))
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
                 a.push(b);
@@ -1053,9 +1030,7 @@ impl DataSmart {
         //
         // eprintln!("=====");
 
-        let Some(resolved_start_value) = resolved_variable_operations.first().cloned() else {
-            return None;
-        };
+        let resolved_start_value = resolved_variable_operations.first().cloned()?;
 
         #[derive(Debug)]
         enum RetValue {

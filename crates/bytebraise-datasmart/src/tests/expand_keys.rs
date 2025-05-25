@@ -1,5 +1,8 @@
-use crate::evaluate::eval;
-use crate::macros::get_var;
+#[cfg(test)]
+use crate::{
+    evaluate::eval,
+    macros::get_var
+};
 
 #[test]
 fn expand_keys_1() {
