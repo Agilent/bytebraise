@@ -432,7 +432,7 @@ impl DataSmart {
 
             // Check for override-style operators (append, prepend, and remove)
             if KEYWORD_REGEX
-                .captures_read(&mut locs, &override_str)
+                .captures_read(&mut locs, override_str)
                 .is_some()
             {
                 match stmt_kind.as_ref() {
@@ -477,7 +477,7 @@ impl DataSmart {
 
                 overrides_data = Some(StatementOverrides::Operation {
                     scope: override_scope,
-                    filter: IndexSet::from_iter(override_filter.into_iter()),
+                    filter: IndexSet::from_iter(override_filter),
                 });
             } else {
                 let overrides = split_overrides(override_str);
@@ -628,12 +628,11 @@ impl DataSmart {
                 .detach();
             while let Some(stmt_node_index) = walker.next_node(&self.ds) {
                 let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
-                if let Some(o2) = stmt.override_str.as_ref() {
-                    if o == o2 {
+                if let Some(o2) = stmt.override_str.as_ref()
+                    && o == o2 {
                         stmts.push(stmt_node_index);
                         self.ds.remove_node(stmt_node_index);
                     }
-                }
             }
 
             let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
@@ -641,7 +640,7 @@ impl DataSmart {
                 if stmts.contains(&op.idx) {
                     eprintln!("delete {:?}", &op.idx);
                 }
-                return !stmts.contains(&op.idx);
+                !stmts.contains(&op.idx)
             });
 
             if var_node.operations.is_empty() {
@@ -732,7 +731,7 @@ impl DataSmart {
         let old_var_index = *self.vars.get(old_base_var).unwrap();
 
         if new_var_index != old_var_index {
-            let mut old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
+            let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
 
             for op in old_var_node.operations.clone().into_iter() {
                 match op.op_type {
@@ -955,7 +954,7 @@ impl DataSmart {
         let override_selection_context: Option<IndexSet<String>> = match var_suffix.is_empty() {
             false => {
                 // TODO: revisit: are we sure the new overrides should be inserted into the beginning?
-                let mut new_overrides = IndexSet::from_iter(var_suffix.clone().into_iter());
+                let mut new_overrides = IndexSet::from_iter(var_suffix.clone());
                 for old_override in override_state.clone().unwrap_or_default() {
                     new_overrides.insert(old_override);
                 }
@@ -985,13 +984,12 @@ impl DataSmart {
 
                 // Handle getting the value of a variable override flavor, e.g. `get_var("MY_VAR:a")`.
                 // In that case, pre-filter operations to select those with override strings starting with "a"
-                if !var_suffix.is_empty() {
-                    if !original_override.as_ref().map_or(false, |e| {
+                if !var_suffix.is_empty()
+                    && !original_override.as_ref().is_some_and(|e| {
                         split_overrides(e).starts_with(var_suffix.as_slice())
                     }) {
                         return None;
                     }
-                }
 
                 let resolved_stmt_kind = {
                     match statement.overrides_data.as_ref() {
