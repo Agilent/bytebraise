@@ -7,6 +7,8 @@ use bytebraise_datasmart::petgraph2::DataSmart;
 use bytebraise_syntax::parser::parse_bitbake_from_str;
 use clap::Parser;
 
+use bytebraise_datasmart::get_var;
+
 #[derive(Parser)]
 struct Opts {
     file: PathBuf,
@@ -26,6 +28,6 @@ fn main() {
     parsed.evaluate(&mut d).unwrap();
     println!("{d:#?}");
 
-    let v = d.get_var("BBLAYERS", false).unwrap();
+    let v = get_var!(&d, "BBLAYERS").unwrap();
     dbg!(v);
 }

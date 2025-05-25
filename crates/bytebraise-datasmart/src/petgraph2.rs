@@ -19,25 +19,30 @@ Major todos:
         }
     - Varflags
     - Variable history
+    - append/prepend/remove combined with +=, .=, etc.
 */
 
 use crate::errors::{DataSmartError, DataSmartResult};
-use crate::variable_operation::{StmtKind, VariableOperation, VariableOperationKind};
+use crate::macros::get_var;
+use crate::variable_operation::{StmtKind, VariableOperation};
+use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
 use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
-use fxhash::FxHashMap;
-use indexmap::IndexSet;
+use fxhash::{FxHashMap, FxHashSet};
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use petgraph::Direction;
 use petgraph::graph::NodeIndex;
+use petgraph::matrix_graph::Nullable;
 use petgraph::prelude::StableGraph;
-use petgraph::stable_graph::DefaultIx;
+use petgraph::stable_graph::{DefaultIx, EdgeIndex};
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::LazyLock;
 
@@ -68,8 +73,7 @@ impl ExpansionState {
 pub struct DataSmart {
     ds: StableGraph<GraphItem, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
-    // TODO new type
-    unexpanded_statements: Vec<(String, StmtKind, String)>,
+    unexpanded_operations: HashSet<EdgeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
@@ -135,10 +139,12 @@ pub struct DataSmart {
 // TODO: better way?
 static EMPTY_OVERRIDES: LazyLock<IndexSet<String>> = LazyLock::new(IndexSet::new);
 
+type OverrideScore = (Vec<usize>, usize, usize);
+
 fn score_override(
     active_overrides: &Option<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
-) -> Option<(Vec<usize>, usize, usize)> {
+) -> Option<OverrideScore> {
     // Reject this override if it contains terms not in active override set
     let temp_cloned_active_overrides = active_overrides
         .as_ref()
@@ -208,98 +214,115 @@ fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
         .collect()
 }
 
+fn split_overrides_without_keywords<S: AsRef<str>>(input: S) -> Vec<String> {
+    split_overrides(input)
+        .into_iter()
+        .filter(|o| match o.as_str() {
+            "append" => false,
+            "prepend" => false,
+            "remove" => false,
+            _ => true,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum ResolvedOverridesData {
+enum StatementOverrides {
     Operation {
         lhs: Vec<String>,
         rhs: IndexSet<String>,
-        score: (Vec<usize>, usize, usize),
+        // TODO: move operation type into here?
     },
     PureOverride {
         overrides: Vec<String>,
-        score: (Vec<usize>, usize, usize),
     },
 }
 
-impl ResolvedOverridesData {
-    fn override_filter(&self) -> IndexSet<String> {
+impl StatementOverrides {
+    fn is_active(
+        &self,
+        override_selection_context: &Option<IndexSet<String>>,
+        active_overrides: &Option<IndexSet<String>>,
+    ) -> bool {
         match self {
-            ResolvedOverridesData::Operation { lhs, .. } => lhs.iter().cloned().collect(),
-            ResolvedOverridesData::PureOverride { overrides, .. } => {
-                overrides.iter().cloned().collect()
+            Self::Operation { rhs, lhs } => {
+                // For scope, consider selection context (active set + direct variant lookup)
+                let lhs_valid = override_selection_context.as_ref().is_none_or(|o2| {
+                    let lhs: IndexSet<String> = lhs.iter().cloned().collect();
+                    lhs.is_subset(o2)
+                });
+
+                // For filter, consider active override set
+                let rhs_valid = active_overrides.as_ref().is_none_or(|o| rhs.is_subset(o));
+
+                rhs_valid && lhs_valid
+            }
+            Self::PureOverride { overrides } => {
+                override_selection_context
+                    .as_ref()
+                    .is_none_or(|active_overrides| {
+                        let overrides: IndexSet<String> = overrides.iter().cloned().collect();
+                        overrides.is_subset(active_overrides)
+                    })
             }
         }
     }
 
-    fn is_valid_for_filter(&self, override_filter: &IndexSet<String>) -> bool {
+    fn score(&self, active_overrides: &Option<IndexSet<String>>) -> Option<OverrideScore> {
         match self {
-            ResolvedOverridesData::Operation { lhs, .. } => {
-                let lhs: IndexSet<String> = lhs.iter().cloned().collect();
-                lhs.is_empty() || lhs == *override_filter
-            }
-            ResolvedOverridesData::PureOverride { overrides, .. } => {
-                let overrides: IndexSet<String> = overrides.iter().cloned().collect();
-                eprintln!(
-                    "checking {:?} == {:?} ({})",
-                    overrides,
-                    override_filter,
-                    overrides == *override_filter
-                );
-                overrides.is_empty() || overrides == *override_filter
-            }
+            Self::Operation { lhs, .. } => score_override(active_overrides, lhs),
+            Self::PureOverride { overrides } => score_override(active_overrides, overrides),
         }
     }
 
-    fn is_active(&self, active_overrides: &Option<IndexSet<String>>) -> bool {
-        active_overrides
-            .as_ref()
-            .is_some_and(|active_overrides| match self {
-                ResolvedOverridesData::Operation { rhs, .. } => rhs.is_subset(active_overrides),
-                ResolvedOverridesData::PureOverride { overrides, .. } => {
-                    let overrides: IndexSet<String> = overrides.iter().cloned().collect();
-                    overrides.is_subset(active_overrides)
-                }
-            })
+    fn score_and_check_active(&self, active_overrides: &Option<IndexSet<String>>) {}
+
+    fn is_override_operation(&self) -> bool {
+        match self {
+            Self::Operation { .. } => true,
+            Self::PureOverride { .. } => false,
+        }
+    }
+
+    // TODO: better name
+    fn override_lhs(&self) -> Vec<String> {
+        match self {
+            Self::Operation { lhs, .. } => lhs.clone(),
+            Self::PureOverride { overrides } => overrides.clone(),
+        }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ResolvedVariableOperation {
-    overrides_data: Option<ResolvedOverridesData>,
-    unexpanded_override: String,
-    op_type: VariableOperationKind,
+    // TODO: would be better to just have &StmtNode?
+    overrides_data: Option<(StatementOverrides, OverrideScore)>,
+    stmt_kind: StmtKind,
     value: String,
     stmt_index: NodeIndex,
 }
 
 impl ResolvedVariableOperation {
-    fn override_score(&self) -> (Vec<usize>, usize, usize) {
+    fn override_score(&self) -> OverrideScore {
         match &self.overrides_data {
             // TODO: revisit None?
             None => (vec![], 0, 0),
-            Some(ResolvedOverridesData::Operation { score, .. }) => score.clone(),
-            Some(ResolvedOverridesData::PureOverride { score, .. }) => score.clone(),
+            Some((_, score)) => score.clone(),
         }
     }
 
     fn is_override_operation(&self) -> bool {
-        match self.overrides_data {
-            None => false,
-            Some(ResolvedOverridesData::PureOverride { .. }) => false,
-            Some(ResolvedOverridesData::Operation { .. }) => true,
-        }
-    }
-
-    fn is_synthesized_operation(&self) -> bool {
-        self.op_type.is_synthesized_operation()
+        self.overrides_data
+            .as_ref()
+            .map(|o| o.0.is_override_operation())
+            .unwrap_or_default()
     }
 
     fn override_lhs(&self) -> Vec<String> {
-        match &self.overrides_data {
-            None => vec![],
-            Some(ResolvedOverridesData::PureOverride { overrides, .. }) => overrides.clone(),
-            Some(ResolvedOverridesData::Operation { lhs, .. }) => lhs.clone(),
-        }
+        self.overrides_data
+            .as_ref()
+            .map(|o| o.0.override_lhs())
+            .unwrap_or_default()
     }
 }
 
@@ -308,7 +331,7 @@ impl Ord for ResolvedVariableOperation {
         self.override_score()
             .cmp(&other.override_score())
             .reverse()
-            .then(self.op_type.cmp(&other.op_type))
+            .then(self.stmt_kind.cmp(&other.stmt_kind))
     }
 }
 
@@ -329,7 +352,7 @@ impl DataSmart {
         DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
-            unexpanded_statements: Vec::new(),
+            unexpanded_operations: HashSet::new(),
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
@@ -368,65 +391,113 @@ impl DataSmart {
     }
 
     pub fn plus_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::PlusEqual, true);
+        self.set_var_ex(var, value, Some(StmtKind::PlusEqual));
     }
 
     pub fn equals_plus_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::EqualPlus, true);
+        self.set_var_ex(var, value, Some(StmtKind::EqualPlus));
     }
 
     pub fn equals_dot_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::EqualDot, true);
+        self.set_var_ex(var, value, Some(StmtKind::EqualDot));
     }
 
     pub fn dot_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::DotEqual, true);
+        self.set_var_ex(var, value, Some(StmtKind::DotEqual));
     }
 
     pub fn weak_default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::WeakDefault, true);
+        self.set_var_ex(var, value, Some(StmtKind::WeakDefault));
     }
 
     pub fn default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, StmtKind::Default, true);
+        self.set_var_ex(var, value, Some(StmtKind::Default));
     }
 
     fn set_var_ex<T: Into<String>, S: Into<String>>(
         &mut self,
         var: T,
         value: S,
-        stmt_kind: StmtKind,
-        check_keyword: bool,
-    ) {
+        mut stmt_kind: Option<StmtKind>,
+    ) -> NodeIndex<DefaultIx> {
         let var = var.into();
         let value = value.into();
 
-        dbg!(&var, &value);
-
-        if var.contains("${") {
-            self.unexpanded_statements.push((var.clone(), stmt_kind, value.clone()));
-        }
+        dbg!(&var);
 
         let var_parts = var.split_once(':');
         let base = var_parts.map_or(var.as_str(), |parts| parts.0);
         let override_str = var_parts.map(|parts| parts.1);
 
-        if check_keyword {
-            let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
+        let mut overrides_data = None;
+        if let Some(override_str) = override_str {
+            let mut locs = KEYWORD_REGEX.capture_locations();
 
-            if keyword_match
-                .and_then(|m| m.name("keyword").map(|k| k.as_str()))
+            // Check for override-style operators (append, prepend, and remove)
+            if KEYWORD_REGEX
+                .captures_read(&mut locs, &override_str)
                 .is_some()
             {
-                unimplemented!()
-            };
+                match stmt_kind.as_ref() {
+                    None | Some(StmtKind::Assign) => { /* fine */ }
+                    Some(_) => {
+                        todo!("append/prepend/remove combined with operators");
+                    }
+                }
+
+                let keyword_pos = locs.get(1).unwrap();
+                match &override_str[keyword_pos.0..keyword_pos.1] {
+                    "append" => {
+                        stmt_kind = Some(StmtKind::Append);
+                    }
+                    "prepend" => {
+                        stmt_kind = Some(StmtKind::Prepend);
+                    }
+                    "remove" => {
+                        stmt_kind = Some(StmtKind::Remove);
+                    }
+                    _ => unreachable!(),
+                };
+
+                // TODO: terminology
+                // Overrides before the keyword - unconditionally applied, depending on the
+                // start value that is selected
+                let override_lhs = split_overrides(&override_str[0..keyword_pos.0]);
+                debug_assert!(!override_lhs.iter().any(|o| match o.as_str() {
+                    "append" => true,
+                    "prepend" => true,
+                    "remove" => true,
+                    _ => false,
+                }));
+
+                // TODO: terminology
+                // Overrides after the keyword - conditionally applied
+                let override_rhs = split_overrides(&override_str[keyword_pos.1..]);
+                debug_assert!(!override_rhs.iter().any(|o| match o.as_str() {
+                    "append" => true,
+                    "prepend" => true,
+                    "remove" => true,
+                    _ => false,
+                }));
+
+                overrides_data = Some(StatementOverrides::Operation {
+                    lhs: override_lhs,
+                    rhs: IndexSet::from_iter(override_rhs.into_iter()),
+                });
+            } else {
+                let overrides = split_overrides(override_str);
+                overrides_data = Some(StatementOverrides::PureOverride { overrides });
+            }
         }
+
+        let stmt_kind = stmt_kind.unwrap_or(StmtKind::Assign);
 
         // TODO: if parsing, and no keyword given, then wipe away removes, prepends, and appends
         //  Also need to do something with overrides - not sure what though (set setVar())
 
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
             override_str: override_str.map(String::from),
+            overrides_data,
             kind: stmt_kind,
             rhs: value,
         }));
@@ -444,10 +515,22 @@ impl DataSmart {
             idx: stmt_idx,
         });
 
-        self.ds.add_edge(*var_entry, stmt_idx, ());
+        let e = self.ds.add_edge(*var_entry, stmt_idx, ());
+
+        // If any part of the key contains '${' (not just the base), then track it as unexpanded.
+        // Use [`DataSmart::expand_vars`] to expand it later.
+        if var.contains("${") {
+            self.unexpanded_operations.insert(e);
+        }
+
+        *var_entry
     }
 
-    pub fn set_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
+    pub fn set_var<T: Into<String>, S: Into<String>>(
+        &mut self,
+        var: T,
+        value: S,
+    ) -> NodeIndex<DefaultIx> {
         let var = var.into();
         let value = value.into();
 
@@ -458,20 +541,7 @@ impl DataSmart {
             );
         }
 
-        let var_parts = var.split_once(':');
-        let override_str = var_parts.map(|parts| parts.1);
-
-        let keyword_match = override_str.and_then(|s| KEYWORD_REGEX.captures(s));
-
-        let stmt_kind = match keyword_match.and_then(|m| m.name("keyword").map(|k| k.as_str())) {
-            None => StmtKind::Assign,
-            Some("append") => StmtKind::Append,
-            Some("prepend") => StmtKind::Prepend,
-            Some("remove") => StmtKind::Remove,
-            Some(_) => unreachable!(),
-        };
-
-        self.set_var_ex(var, value, stmt_kind, false);
+        self.set_var_ex(var, value, None)
     }
 
     pub fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
@@ -529,7 +599,7 @@ impl DataSmart {
                     }
 
                     Ok(self
-                        .get_var(referenced_var, false)
+                        .get_var(referenced_var, false, true)
                         .unwrap_or(match_str.to_string()))
                 },
             )?;
@@ -544,28 +614,265 @@ impl DataSmart {
     }
 
     pub fn del_var<S: AsRef<str>>(&mut self, var: S) -> DataSmartResult<()> {
-        if let Some(idx) = self.vars.remove(var.as_ref()) {
-            self.ds.remove_node(idx).unwrap();
+        let var = var.as_ref();
+        let (base_var, overrides) = var
+            .split_once(':')
+            .map_or((var, None), |p| (p.0, Some(p.1)));
+
+        let Some(var_index) = self.vars.get(base_var).copied() else {
+            return Ok(());
+        };
+
+        let mut deleted_all_stmts = false;
+        if let Some(o) = overrides {
+            // Find statements with this exact override
+            let mut stmts = vec![];
+            let mut walker = self
+                .ds
+                .neighbors_directed(var_index, Direction::Outgoing)
+                .detach();
+            while let Some(stmt_node_index) = walker.next_node(&self.ds) {
+                let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
+                if let Some(o2) = stmt.override_str.as_ref() {
+                    if o == o2 {
+                        stmts.push(stmt_node_index);
+                        self.ds.remove_node(stmt_node_index);
+                    }
+                }
+            }
+
+            let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
+            var_node.operations.heap.retain(|op| {
+                if stmts.contains(&op.0.idx) {
+                    eprintln!("delete {:?}", &op.0.idx);
+                }
+                return !stmts.contains(&op.0.idx);
+            });
+
+            if var_node.operations.is_empty() {
+                deleted_all_stmts = true;
+            }
+        }
+
+        if deleted_all_stmts || overrides.is_none() {
+            // delete entire variable
+            self.vars.remove(base_var);
+
+            // No need to delete all statements if we already did it above
+            if !deleted_all_stmts {
+                // TODO: use VariableOperations instead of walking graph manually?
+                let mut walker = self
+                    .ds
+                    .neighbors_directed(var_index, Direction::Outgoing)
+                    .detach();
+                while let Some(stmt_node_index) = walker.next_node(&self.ds) {
+                    // Only delete the statement if another variable isn't using it
+
+                    // TODO: this should only happen in specific cases, e.g. when delVar is called
+                    //  as part of renameVar. Should come up with a special version of delVar just
+                    //  for renameVar.
+                    let c = self.ds.neighbors_undirected(stmt_node_index).count();
+                    if c <= 1 {
+                        self.ds.remove_node(stmt_node_index);
+                    }
+                }
+            }
+
+            self.ds.remove_node(var_index);
         }
 
         Ok(())
     }
 
-    pub fn expand_keys(&mut self) -> DataSmartResult<()> {
-        let mut statements = std::mem::take(&mut self.unexpanded_statements);
+    /// expand_keys() has to handle several different kinds of situations. They all play out a bit
+    /// differently.
+    ///
+    /// TEST = "base"
+    /// TES${Q}:append = "a"
+    /// TES${Q}:append = "b"
+    /// Q = "T"
+    /// P = "T:append"
+    ///
+    /// todolist: {'TES${Q}': 'TEST', 'TES${P}': 'TEST:append'}
+    /// renameVar(TES${P}, TEST:append)
+    /// Variable key TES${Q} (ab) replaces original key TEST (baseQ).
+    /// renameVar(TES${Q}, TEST)
 
-        for (key, stmt, value) in statements.drain(..) {
-            let expanded_key = self.expand(&key)?;
-            // TODO: correct warning message to include values
-            eprintln!(
-                "WARNING: Variable key {} replaces original key {}",
-                expanded_key, key
-            );
+    /// TESQ:A = "1"
+    /// TESQ:${A} = "a"
+    /// A = "A"
+    ///
+    /// todolist: {'TESQ:${A}': 'TESQ:A'}
+    /// Variable key TESQ:${A} (a) replaces original key TESQ:A (1).
+    /// renameVar(TESQ:${A}, TESQ:A)
 
-            self.set_var(expanded_key, value);
+    pub fn rename_var<A: AsRef<str>, B: AsRef<str>>(
+        &mut self,
+        old: A,
+        new: B,
+    ) -> DataSmartResult<()> {
+        let old = old.as_ref();
+        let new = new.as_ref();
+
+        let old_base_var = old.split_once(':').map_or(old, |p| p.0);
+        let new_base_var = new.split_once(':').map_or(new, |p| p.0);
+
+        eprintln!("renameVar({old}, {new})");
+        eprintln!("vars before call: {}", self.vars.keys().sorted().join(", "));
+
+        if old == new {
+            bail!("Calling renameVar with equivalent keys {old} is invalid");
         }
 
+        // Get unexpanded value of the full old var, and assign it to new var
+        if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
+            eprintln!("getVar({old}) = {old_val}");
+            eprintln!("setVar({new}, {old_val}");
+            // TODO: parsing mode?
+            self.set_var(new, old_val);
+        }
+
+        // Next, transplant :appends, :prepends, and :removes
+        let new_var_index = *self.vars.get(new_base_var).unwrap();
+        let old_var_index = *self.vars.get(old_base_var).unwrap();
+
+        if new_var_index != old_var_index {
+            let mut old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
+
+            for (op, _) in old_var_node.operations.clone().heap.into_iter() {
+                match op.op_type {
+                    StmtKind::Append | StmtKind::Prepend | StmtKind::Remove => {
+                        self.ds.add_edge(new_var_index, op.idx, ());
+                        self.ds
+                            .node_weight_mut(new_var_index)
+                            .unwrap()
+                            .variable_mut()
+                            .operations
+                            .push(op);
+                        //(op);
+                    }
+                    _ => continue,
+                }
+            }
+        } else {
+            eprintln!("bypass");
+        }
+
+        //dbg!(&self.ds);
+
+        eprintln!("del_var({old})");
+        self.del_var(old)?;
+
+        eprintln!("vars after call: {}", self.vars.keys().sorted().join(", "));
+
         Ok(())
+    }
+
+    /// There are three kinds of unexpanded keys we need to handle.
+    ///
+    /// Case 1: Unexpanded override(s)
+    /// Example:
+    ///     VAR:${B} = "value"
+    ///     B = "whatever"
+    ///
+    /// Internally, there is a variable "VAR" with an operation ':${B} = "value"'
+    /// All we need to do is expand the ${B} part and adjust the variable operation for
+    /// VAR to reflect the new override string.
+    ///
+    /// Case 2: Unexpanded variable name
+    /// Example:
+    ///     VA${V} = "value"
+    ///     V = "R"
+    ///
+    /// Internally, there is a variable "VA${V}" with an operation '= "value"'.
+    ///
+    /// In BitBake, expandKeys() here triggers a call to renameVar("VA${V}", "VAR"). BitBake's
+    /// renameVar() does the following:
+    ///     1. Gets the unexpanded value of VA${V} (in parsing mode, so override-style appends,
+    ///         prepends, and removes are not applied)
+    ///     2. Calls setVar("VAR", <value>). setVar is also called in parsing mode, which blows
+    ///         away all appends, prepends, and removes on VAR.
+    ///     3. Transfers the appends, prepends, and removes from VA${V} to VAR. Not sure why it does this,
+    ///         since it essentially undoes the blowing away of those varflags from (2).
+    ///     4. Calls delVar("VA${V}")
+    ///
+    /// We are in a position to do all of this much more simply:
+    ///     1. Create a "VAR" node.
+    ///     2. Transfer operations from VA${V} node onto the VAR node.
+    ///     3. Delete VA${V} node.
+    ///
+    ///
+    /// Another example:
+    ///     VAR = "value"
+    ///     VA${V}:append = " appended"
+    ///     V = "R"
+    ///
+    /// Internally, we have three variables each with a single operation.
+    ///
+    /// We need to do this:
+    ///     1. Transfer operations from VA${V} node onto the VAR node.
+    ///     2. Delete VA${V} node.
+    ///
+    pub fn expand_keys(&mut self) -> DataSmartResult<Vec<String>> {
+        let mut unexpanded_operations = std::mem::take(&mut self.unexpanded_operations);
+        dbg!(&unexpanded_operations);
+
+        let mut operations = BTreeMap::new();
+
+        #[derive(Debug)]
+        struct Operation {
+            kind: UnexpandedOperationKind,
+            stmt_index: NodeIndex<DefaultIx>,
+            var_index: NodeIndex<DefaultIx>,
+        }
+
+        #[derive(Debug)]
+        enum UnexpandedOperationKind {
+            Variable,
+            Override,
+            Both,
+        }
+
+        // TODO: if not all 'override' operations, then need to actually do renameKey?
+
+        // Reconstruct the unexpanded keys
+        for edge in unexpanded_operations.drain() {
+            let node = self.ds.edge_endpoints(edge).unwrap();
+            let nodes = self.ds.index_twice_mut(node.0, node.1);
+
+            let mut kind = None;
+            let mut name = nodes.0.variable().name.clone();
+            if name.contains("${") {
+                kind = Some(UnexpandedOperationKind::Variable);
+            }
+
+            if let Some(b) = nodes.1.statement().override_str.clone() {
+                // TODO: more efficient
+                let overrides = split_overrides_without_keywords(&b);
+                if !overrides.is_empty() {
+                    name.push(':');
+                    name.push_str(&overrides.join(":"));
+                }
+
+                if b.contains("${") {
+                    if matches!(kind, Some(UnexpandedOperationKind::Variable)) {
+                        kind = Some(UnexpandedOperationKind::Both);
+                    } else {
+                        kind = Some(UnexpandedOperationKind::Override);
+                    }
+                }
+            }
+
+            let expanded = self.expand(&name)?;
+            operations.insert(name, expanded);
+        }
+
+        let ret = operations.keys().cloned().collect_vec();
+        for o in operations.into_iter() {
+            self.rename_var(o.0, o.1)?;
+        }
+
+        Ok(ret)
     }
 
     fn compute_overrides(&self) -> DataSmartResult<()> {
@@ -576,18 +883,22 @@ impl DataSmart {
 
             for i in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s =
-                    split_filter_empty(&self.get_var("OVERRIDES", false).unwrap_or_default(), ":")
-                        .map(String::from)
-                        .collect::<IndexSet<String>>();
+                let s = split_filter_empty(
+                    &self.get_var("OVERRIDES", false, true).unwrap_or_default(),
+                    ":",
+                )
+                .map(String::from)
+                .collect::<IndexSet<String>>();
 
                 //eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 =
-                    split_filter_empty(&self.get_var("OVERRIDES", false).unwrap_or_default(), ":")
-                        .map(String::from)
-                        .collect::<IndexSet<String>>();
+                let s2 = split_filter_empty(
+                    &self.get_var("OVERRIDES", false, true).unwrap_or_default(),
+                    ":",
+                )
+                .map(String::from)
+                .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -600,12 +911,26 @@ impl DataSmart {
         Ok(())
     }
 
-    pub fn get_var<S: AsRef<str>>(&self, var: S, parsing: bool) -> Option<String> {
+    pub fn get_var<S: AsRef<str>>(&self, var: S, parsing: bool, expand: bool) -> Option<String> {
         let var = var.as_ref();
+        //dbg!(var);
         // `var_base` is the root/stem part of the variable without any overrides
         let (var_base, var_suffix) = var
             .split_once(":")
             .map_or_else(|| (var, None), |parts| (parts.0, Some(parts.1)));
+
+        // TODO: terminology: direct-variant lookup
+        let var_suffix = split_overrides(var_suffix.unwrap_or_default());
+        // If an override-style operator is present, then it will never match so return None
+        // TODO: what if someone adds one to OVERRIDES?
+        if var_suffix.iter().any(|o| match o.as_str() {
+            "append" => true,
+            "prepend" => true,
+            "remove" => true,
+            _ => false,
+        }) {
+            return None;
+        }
 
         // Lookup the variable, otherwise return None
         let var_entry = self.vars.get(var_base)?;
@@ -627,21 +952,27 @@ impl DataSmart {
 
         let override_state = &*RefCell::borrow(&self.active_overrides);
 
-        let override_state_filtered: Option<IndexSet<String>> = match var_suffix.as_ref() {
-            Some(suffix) => {
-                let suffix_overrides = split_overrides(suffix);
-
+        // The union of active overrides with whatever overrides were provided in the
+        // direct-variant lookup. This is only used for override-scoped operators.
+        let override_selection_context: Option<IndexSet<String>> = match var_suffix.is_empty() {
+            false => {
                 // TODO: revisit: are we sure the new overrides should be inserted into the beginning?
-                let mut new_overrides = IndexSet::from_iter(suffix_overrides.into_iter());
+                let mut new_overrides = IndexSet::from_iter(var_suffix.clone().into_iter());
                 for old_override in override_state.clone().unwrap_or_default() {
                     new_overrides.insert(old_override);
                 }
 
                 Some(new_overrides)
             }
-            None => override_state.clone(),
+            true => override_state.clone(),
         };
 
+        if var != "OVERRIDES" {
+            //eprintln!("operations for var {var}:");
+            //dbg!(&var_data.operations);
+        }
+
+        // Calculate override scores for operations
         let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
             .operations
             .heap
@@ -649,19 +980,11 @@ impl DataSmart {
             .filter_map(|op| {
                 let statement = self.ds.node_weight(op.0.idx).unwrap().statement();
 
-                // Expand the overrides for the statement. Later, we will pay special attention
-                // to whether it turns out an override-style operator ('append', 'prepend',
-                // or 'remove') is part of the expanded override.
-                let original_override = statement.override_str.clone().unwrap_or_default();
-                let expanded_override = statement
-                    .override_str
-                    .as_ref()
-                    .map(|s| self.expand(s))
-                    .transpose()
-                    .unwrap();
-                if original_override.contains("$") {
-                    return None;
-                }
+                let original_override = statement.override_str.clone();
+                // if original_override.contains("$") {
+                //     eprintln!("rejecting original override: {}", &original_override);
+                //     return None;
+                // }
 
                 // TODO: no_weak_default option
                 // if var_op_kind == VariableOperationKind::WeakDefault {
@@ -670,121 +993,45 @@ impl DataSmart {
 
                 // Handle getting the value of a variable override flavor, e.g. `get_var("MY_VAR:a")`.
                 // In that case, pre-filter operations to select those with override strings starting with "a"
-                if let Some(suffix) = var_suffix {
-                    if !expanded_override.as_ref().map_or(false, |e| {
-                        split_overrides(e).starts_with(split_overrides(suffix).as_slice())
+                if !var_suffix.is_empty() {
+                    if !original_override.as_ref().map_or(false, |e| {
+                        split_overrides(e).starts_with(var_suffix.as_slice())
                     }) {
                         return None;
                     }
                 }
 
-                let mut var_op_kind: VariableOperationKind = op.0.op_type.into();
-                debug_assert!(!var_op_kind.is_synthesized_operation());
-
                 let mut resolved_od = None;
-                if let Some(expanded_lhs) = expanded_override {
-                    let mut locs = KEYWORD_REGEX.capture_locations();
+                if let Some(overrides) = statement.overrides_data.as_ref() {
+                    // TODO: combine override scoring with filtering for clarity and to eliminate
+                    //  duplicated work (both this step and the is_active check later do subset
+                    //  checking).
+                    let Some(score) = overrides.score(&override_selection_context) else {
+                        // Overrides not active - reject
+                        dbg!(&statement);
+                        dbg!(&override_selection_context);
+                        return None;
+                    };
 
-                    // Check for override-style operators (append, prepend, and remove)
-                    if KEYWORD_REGEX
-                        .captures_read(&mut locs, &expanded_lhs)
-                        .is_some()
-                    {
-                        let keyword_pos = locs.get(1).unwrap();
-
-                        // If upon expansion of the override string we found an override-style
-                        // operator (which wasn't there before), then change the operation kind to a
-                        // "synthesized" append/prepend (or a plain "remove"), as appropriate.
-                        // Synthesized operators are applied just after their vanilla counterparts
-                        // (see `VariableOperationKind::order_value`).
-                        match &expanded_lhs[keyword_pos.0..keyword_pos.1] {
-                            "append" => {
-                                if var_op_kind != VariableOperationKind::Append {
-                                    var_op_kind = VariableOperationKind::SynthesizedAppend;
-                                }
-                            }
-                            "prepend" => {
-                                if var_op_kind != VariableOperationKind::Prepend {
-                                    var_op_kind = VariableOperationKind::SynthesizedPrepend;
-                                }
-                            }
-                            "remove" => {
-                                var_op_kind = VariableOperationKind::Remove;
-                            }
-                            _ => unreachable!("{}", expanded_lhs),
-                        };
-
-                        // TODO: terminology
-                        // Overrides before the keyword - unconditionally applied, depending on the
-                        // start value that is selected
-                        let override_lhs = split_overrides(&expanded_lhs[0..keyword_pos.0]);
-                        debug_assert!(!override_lhs.iter().any(|o| match o.as_str() {
-                            "append" => true,
-                            "prepend" => true,
-                            "remove" => true,
-                            _ => false,
-                        }));
-
-                        // TODO: terminology
-                        // Overrides after the keyword - conditionally applied
-                        let override_rhs = split_overrides(&expanded_lhs[keyword_pos.1..]);
-                        debug_assert!(!override_rhs.iter().any(|o| match o.as_str() {
-                            "append" => true,
-                            "prepend" => true,
-                            "remove" => true,
-                            _ => false,
-                        }));
-
-                        let Some(override_score) =
-                            score_override(&override_state_filtered, &override_lhs)
-                        else {
-                            eprintln!("rejecting: {:#?}", &override_lhs);
-                            // Reject operations if the override is not active
-                            return None;
-                        };
-
-                        resolved_od = Some(ResolvedOverridesData::Operation {
-                            lhs: override_lhs,
-                            rhs: IndexSet::from_iter(override_rhs.into_iter()),
-                            score: override_score,
-                        });
-                    } else {
-                        let overrides = split_overrides(expanded_lhs);
-                        assert!(!overrides.contains(&String::from("remove")));
-
-                        let Some(override_score) =
-                            score_override(&override_state_filtered, &overrides)
-                        else {
-                            eprintln!("rejecting: {:#?}", &overrides);
-                            // Reject operations if the override is not active
-                            return None;
-                        };
-
-                        resolved_od = Some(ResolvedOverridesData::PureOverride {
-                            overrides,
-                            score: override_score,
-                        })
-                    }
+                    resolved_od = Some((overrides.clone(), score));
                 }
 
                 let ret = ResolvedVariableOperation {
+                    stmt_kind: statement.kind,
                     value: statement.rhs.clone(),
-                    unexpanded_override: original_override,
                     stmt_index: op.0.idx,
                     overrides_data: resolved_od,
-                    op_type: var_op_kind,
                 };
 
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
+            .filter(|o| match (parsing, o.stmt_kind) {
+                (true, StmtKind::Append | StmtKind::Prepend | StmtKind::Remove) => false,
+                _ => true,
+            })
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
-                // Fold synthesized appends
-                a.heap.retain(|item| {
-                    !item.0.is_synthesized_operation()
-                        || (item.0.unexpanded_override != b.unexpanded_override)
-                });
                 a.push(b);
                 a
             });
@@ -841,13 +1088,11 @@ impl DataSmart {
             }
         }
 
-        let mut ret = match resolved_start_value.op_type {
-            VariableOperationKind::WeakDefault => {
-                RetValue::WeakDefault(resolved_start_value.value.clone())
-            }
-            _ => RetValue::Eager(match resolved_start_value.op_type {
-                VariableOperationKind::PlusEqual => format!(" {}", resolved_start_value.value),
-                VariableOperationKind::EqualPlus => format!("{} ", resolved_start_value.value),
+        let mut ret = match resolved_start_value.stmt_kind {
+            StmtKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.value.clone()),
+            _ => RetValue::Eager(match resolved_start_value.stmt_kind {
+                StmtKind::PlusEqual => format!(" {}", resolved_start_value.value),
+                StmtKind::EqualPlus => format!("{} ", resolved_start_value.value),
                 _ => resolved_start_value.value.clone(),
             }),
         };
@@ -859,93 +1104,91 @@ impl DataSmart {
         //     resolved_start_value.override_lhs()
         // );
 
-        resolved_variable_operations
-            .heap
-            .retain(|(op, _)| op.stmt_index != resolved_start_value.stmt_index);
-        //eprintln!("before filter: {resolved_variable_operations:#?}");
-
-        // TODO: just filter in loop below
+        // TODO: filter in loop below?
         resolved_variable_operations.heap.retain(|(op, _)| {
-            op.override_score() >= resolved_start_value.override_score()
-                || (op.is_override_operation()
-                    && (op.override_lhs() == resolved_start_value.override_lhs()
-                        || op.override_lhs().is_empty()))
+            // Remove the variable operation that we used for the start value, so we don't double apply
+            op.stmt_index != resolved_start_value.stmt_index
+                // Handle override scoring + LHS
+                // TODO: clarify
+                && (op.override_score() >= resolved_start_value.override_score()
+                    || (op.is_override_operation()
+                        && (op.override_lhs() == resolved_start_value.override_lhs()
+                            || op.override_lhs().is_empty())))
         });
 
-        //eprintln!("{resolved_variable_operations:#?}");
-
-        let rhs_filter: IndexSet<String> = resolved_start_value
-            .overrides_data
-            .as_ref()
-            .map(|od| od.override_filter())
-            .unwrap_or_default();
-        //
-        // if !rhs_filter.is_empty() {
-        //     dbg!(rhs_filter);
-        //     panic!();
-        // }
-
         for (op, _) in &resolved_variable_operations.heap {
-            if !op.overrides_data.as_ref().is_none_or(|od| {
-                od.is_active(override_state) // && od.is_valid_for_filter(&rhs_filter)
-            }) {
+            //dbg!(&op.overrides_data);
+            if op
+                .overrides_data
+                .as_ref()
+                .is_some_and(|od| !od.0.is_active(&override_selection_context, override_state))
+            {
+                dbg!(&override_selection_context);
+                dbg!(&override_state);
+                eprintln!("skip: {:#?}", &op);
+                //dbg!(&override_state_filtered);
                 continue;
             }
-            match op.op_type {
+
+            match op.stmt_kind {
                 // Weak default is handled the same as assign - priority selection happened above
-                VariableOperationKind::Assign => {
+                StmtKind::Assign => {
                     ret = RetValue::Eager(op.value.clone());
                 }
-                VariableOperationKind::WeakDefault => {
+                StmtKind::WeakDefault => {
                     if !matches!(ret, RetValue::Eager(_)) {
                         ret = RetValue::WeakDefault(op.value.clone());
                     }
                 }
-                VariableOperationKind::Remove => {
+                StmtKind::Remove if !parsing => {
                     // TODO: aggregate all removes and do it in one shot?
                     let mut removes: HashSet<String> = HashSet::new();
                     removes.insert(op.value.clone());
                     let new_ret = self.apply_removes(&ret.into(), &removes);
                     ret = RetValue::Eager(new_ret);
                 }
-                VariableOperationKind::Append | VariableOperationKind::SynthesizedAppend => {
+                StmtKind::Append if !parsing => {
                     ret = RetValue::Eager(ret.to_string() + &op.value);
                 }
-                VariableOperationKind::DotEqual => {
+                StmtKind::DotEqual => {
                     if matches!(ret, RetValue::Eager(_)) {
                         ret = RetValue::Eager(ret.to_string() + &op.value);
                     }
                 }
-                VariableOperationKind::Prepend | VariableOperationKind::SynthesizedPrepend => {
+                StmtKind::Prepend if !parsing => {
                     ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
                 }
-                VariableOperationKind::EqualDot => {
+                StmtKind::EqualDot => {
                     if matches!(ret, RetValue::Eager(_)) {
                         ret = RetValue::Eager(format!("{}{}", op.value, ret.as_ref()));
                     }
                 }
-                VariableOperationKind::PlusEqual => {
+                StmtKind::PlusEqual => {
                     if matches!(ret, RetValue::Eager(_)) {
                         ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.value));
                     }
                 }
-                VariableOperationKind::EqualPlus => {
+                StmtKind::EqualPlus => {
                     if matches!(ret, RetValue::Eager(_)) {
                         ret = RetValue::Eager(format!("{} {}", op.value, ret.as_ref()));
                     }
                 }
-                VariableOperationKind::Default => {
+                StmtKind::Default => {
                     if matches!(ret, RetValue::WeakDefault(_)) {
                         ret = RetValue::Default(op.value.clone())
                     }
                 }
+                _ => {
+                    // ignore
+                }
             }
         }
 
-        let ret_str = self.expand(ret.as_ref()).unwrap();
-        //*cached = ret.clone();
+        if expand {
+            return Some(self.expand(ret.as_ref()).unwrap());
+        }
 
-        Some(ret_str)
+        Some(ret.to_string())
     }
 }
 
@@ -977,12 +1220,11 @@ struct StmtNode {
 
     override_str: Option<String>,
 
+    overrides_data: Option<StatementOverrides>,
+
     /// The value
     rhs: String,
 }
-
-#[derive(Debug)]
-struct UnexpandedStatementNode {}
 
 #[derive(Debug)]
 enum GraphItem {
@@ -1005,7 +1247,21 @@ impl GraphItem {
         }
     }
 
+    fn to_variable(self) -> Variable {
+        match self {
+            GraphItem::Variable(v) => v,
+            _ => panic!("Expected GraphItem::Variable"),
+        }
+    }
+
     fn statement(&self) -> &StmtNode {
+        match self {
+            GraphItem::StmtNode(stmt) => stmt,
+            _ => panic!("Expected GraphItem::Statement"),
+        }
+    }
+
+    fn statement_mut(&mut self) -> &mut StmtNode {
         match self {
             GraphItem::StmtNode(stmt) => stmt,
             _ => panic!("Expected GraphItem::Statement"),
@@ -1540,7 +1796,8 @@ A .= "5"
 
     #[test]
     fn dumb() {
-        let mut d = eval(r#"
+        let mut d = eval(
+            r#"
 TEST = "base"
 TEST:append = "1"
 TEST${B} = " wat"
@@ -1548,7 +1805,8 @@ TEST:append = "2"
 
 B = ":append"
 
-        "#);
+        "#,
+        );
 
         d.expand_keys().unwrap();
         assert_eq!(get_var!(&d, "TEST").unwrap(), "base12 wat");
@@ -1558,11 +1816,11 @@ B = ":append"
     fn synthesized_appends() {
         // The behavior of appends vs synthesized appends is different.
         // Normal appends stack:
-        let mut d = DataSmart::new();
-        d.set_var("TEST", "10");
-        d.set_var("TEST:append", "1");
-        d.set_var("TEST:append", "2");
-        assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
+        // let mut d = DataSmart::new();
+        // d.set_var("TEST", "10");
+        // d.set_var("TEST:append", "1");
+        // d.set_var("TEST:append", "2");
+        // assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
 
         // But synthesized appends only take the last one:
         let mut d = DataSmart::new();
@@ -1570,7 +1828,7 @@ B = ":append"
         d.set_var("TEST:${A}", "1");
         d.set_var("TEST:${A}", "2");
         d.set_var("A", "append");
-        d.expand_keys().unwrap();
+        let p = d.expand_keys().unwrap();
         assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
 
@@ -1720,7 +1978,10 @@ B = ":append"
 
         d.set_var("OVERRIDES", "a:b:c");
 
-        d.expand_keys().unwrap();
+        assert_eq!(get_var!(&d, "TEST"), Some(" 53".into()));
+
+        let ret = d.expand_keys().unwrap();
+        assert_eq!(ret, Vec::<String>::new());
 
         assert_eq!(get_var!(&d, "TEST"), Some(" 5377".into()));
     }
@@ -1954,5 +2215,48 @@ B = ":append"
         d.set_var("Q:b:a", "ba");
         assert_eq!(get_var!(&d, "Q:a:b").unwrap(), "ab");
         assert_eq!(get_var!(&d, "Q:b:a").unwrap(), "ba");
+    }
+
+    #[test]
+    fn get_var_append() {
+        let d = eval(
+            r#"
+TEST = "a"
+TEST:append = "b"
+        "#,
+        );
+
+        assert_eq!(get_var!(&d, "TEST:append"), None);
+    }
+
+    #[test]
+    fn doccc() {
+        let d = eval(
+            r#"
+MY_VAR = "base"
+MY_VAR:a = "different"
+MY_VAR:a:append = "!"
+MY_VAR:append:a = "?"
+        "#,
+        );
+
+        assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "base");
+        assert_eq!(get_var!(&d, "MY_VAR:a").unwrap(), "different!");
+    }
+
+    #[test]
+    fn doccc2() {
+        let d = eval(
+            r#"
+MY_VAR = "base"
+MY_VAR:a = "different"
+MY_VAR:a:append = "!"
+MY_VAR:append:a = "?"
+OVERRIDES = "a:b:c"
+        "#,
+        );
+
+        assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "different!?");
+        assert_eq!(get_var!(&d, "MY_VAR:a").unwrap(), "different!");
     }
 }

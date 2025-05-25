@@ -66,7 +66,9 @@ fn evaluate_assignment_expression(
     }
 
     match expr.op().syntax().kind() {
-        SyntaxKind::Equals => data.set_var(key, assigned_value),
+        SyntaxKind::Equals => {
+            data.set_var(key, assigned_value);
+        }
         SyntaxKind::WeakEquals => data.weak_default_var(key, assigned_value),
         SyntaxKind::DefaultEquals => data.default_var(key, assigned_value),
         SyntaxKind::EqualsDot => data.equals_dot_var(key, assigned_value),

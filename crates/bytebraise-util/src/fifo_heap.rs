@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug)]
@@ -24,6 +25,21 @@ impl<T: Ord> FifoHeap<T> {
         let seq = self.seq.checked_add(1).unwrap();
         self.seq = seq;
         self.heap.insert((val, seq));
+    }
+
+    pub fn len(&self) -> usize {
+        self.heap.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+}
+
+impl<T: Ord> FifoHeap<T> {
+    pub fn remove(&mut self, value: &T) {
+        // TODO: more efficient
+        self.heap.retain(|(a, b)| a != value)
     }
 }
 

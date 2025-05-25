@@ -3,10 +3,11 @@
 //! This crate is tasked with implementing the syntax described here: <https://docs.yoctoproject.org/bitbake/bitbake-user-manual/bitbake-user-manual-metadata.html>. This document
 //! does not strive to fully explain the syntax - see the previous link for that. Instead, it tries to explain how `bytebraise` implements it.
 //!
+//!
+//!
 //! ## Terminology
 //! `bytebraise` implements BitBake syntax in a much different way than BitBake itself does. Below
 //! you'll find some terminology I've come up with to try to explain how `bytebraise` works.
-//!
 //! ### Base variables and override variants
 //! Consider this snippet:
 //!
@@ -16,8 +17,8 @@
 //! MY_VAR:a:b = "ab"
 //! ```
 //!
-//! Let `MY_VAR` be the **base variable**, and let `MY_VAR:a` and `MY_VAR:a:b` be its
-//! **override variants**.
+//! Let `MY_VAR` be the **base variable**, and let `MY_VAR:a` and `MY_VAR:a:b` be
+//! **override-qualified variables**. `My_VAR:a` and `MY_VAR:a:b` can also be called **override-qualified variants** of `MY_VAR`.
 //!
 //! BitBake informally calls the latter ["versions"](https://docs.yoctoproject.org/bitbake/bitbake-user-manual/bitbake-user-manual-metadata.html#conditional-metadata) of a variable.
 //!
@@ -29,23 +30,38 @@
 //! MY_VAR:append = " more"
 //! MY_VAR:append:a = " a"
 //! MY_VAR:b:append = " b"
+//! MY_VAR:a:append:b = " ab"
 //! ```
 //!
 //! Terminology:
 //! - `MY_VAR:append` is an **unqualified** append operator.
 //! - `MY_VAR:append:a` is an **override-filtered** operator - it applies if the `a` override is active.
 //! - `MY_VAR:b:append` is an **override-scoped** operator - it applies to the `MY_VAR:b` override variant.
+//! - `MY_VAR:a:append:b` is both - it applies to the `MY_VAR:b` override variant if `a` is active. We can call it a **scoped-and-filtered operator**.
 //!
-//! You can also have an assignment that is a combination of an override-filtered and override-scoped operator:
+//! ### Direct variant lookup
+//! Consider:
 //!
 //! ```text
 //! MY_VAR = "base"
-//! MY_VAR:a:append:b = " ab"
+//! MY_VAR:a = "flavor"
 //! ```
 //!
-//! In this example, `MY_VAR:a:append:b` is scoped to the `MY_VAR:a`, but filtered to only apply
-//! when the `b` override is active. I don't have a great term for this yet (not sure if it needs one?),
-//! but if you insist, maybe *scoped-and-filtered* operator?
+//! We can explicitly get the value of `MY_VAR:a` with `d.getVar("MY_VAR:a")` (in BitBake) or `get_var!($d, "MY_VAR:a")` (in `bytebraise`).
+//!
+//! This is called a **direct variant lookup**. What's interesting is the interaction between direct variant lookups and override-scoped operators:
+//!
+//! ```text
+//! MY_VAR = "base"
+//! MY_VAR:a = "different"
+//! MY_VAR:a:append = "!"
+//! MY_VAR:append:a = "?"
+//! ```
+//!
+//! Calling `get_var!($d, "MY_VAR")` gives `"base"`, `get_var!($d, "MY_VAR:a")` gives `"different!"`.
+//!
+//! The presence of `'a'` in `MY_VAR:a` influences the override scope, but not the override filter (since `a` is not actually
+//! in the override set, the `MY_VAR:append:a = "?"` doesn't apply).
 //!
 //! ### Override score
 //! The basic idea behind BitBake overrides is that the more "specific" override wins. Overrides
@@ -71,4 +87,5 @@ pub mod errors;
 pub mod evaluate;
 pub mod macros;
 pub mod petgraph2;
+mod tests;
 pub mod variable_operation;
