@@ -867,6 +867,8 @@ impl DataSmart {
             operations.insert(name, expanded);
         }
 
+        // TODO: BitBake stores override variants as separate variables. So given "TEST:${A}:b:a",
+        //  we also need to produce "TEST:${A}:b", "TEST:${A}" and rename those in this list.
         let ret = operations.keys().cloned().collect_vec();
         for o in operations.into_iter() {
             self.rename_var(o.0, o.1)?;
