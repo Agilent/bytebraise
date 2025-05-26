@@ -1231,7 +1231,7 @@ mod test {
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
         let active_overrides: IndexSet<String> =
-            vec!["a", "b", "c"].drain(..).map(String::from).collect();
+            IndexSet::from(["a".into(), "b".into(), "c".into()]);
 
         let candidate: Vec<String> = input.chars().map(String::from).collect();
         let ret = score_override(&Cow::Borrowed(&active_overrides), &candidate).unwrap();
