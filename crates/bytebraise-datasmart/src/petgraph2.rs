@@ -1624,7 +1624,6 @@ A .= "5"
         score("aabb");
         score("abab");
         score("baba");
-        panic!();
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
