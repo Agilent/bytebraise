@@ -190,7 +190,9 @@ fn score_override(
                     assert_eq!(ret.2, 0);
                     ret.2 = ai + 1;
                     break 'outer;
-                } else if candidate.len() > 1 && candidate.ends_with(std::slice::from_ref(active_override)) {
+                } else if candidate.len() > 1
+                    && candidate.ends_with(std::slice::from_ref(active_override))
+                {
                     let old = candidate.clone();
                     //eprintln!("{:?}", candidate);
                     candidate.retain_with_index(|c, i| i == 0 || c != active_override);
@@ -238,6 +240,9 @@ impl StatementOverrides {
         override_selection_context: &Option<IndexSet<String>>,
         active_overrides: &Option<IndexSet<String>>,
     ) -> bool {
+        assert!(override_selection_context.is_some());
+        assert!(active_overrides.is_some());
+
         match self {
             Self::Operation { filter, scope } => {
                 // For scope, consider selection context (active set + direct variant lookup)
@@ -453,11 +458,19 @@ impl DataSmart {
                 // Overrides before the keyword - unconditionally applied, depending on the
                 // start value that is selected
                 let override_scope = split_overrides(&override_str[0..keyword_pos.0]);
-                debug_assert!(!override_scope.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")));
+                debug_assert!(
+                    !override_scope
+                        .iter()
+                        .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+                );
 
                 // Overrides after the keyword - conditionally applied
                 let override_filter = split_overrides(&override_str[keyword_pos.1..]);
-                debug_assert!(!override_filter.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")));
+                debug_assert!(
+                    !override_filter
+                        .iter()
+                        .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+                );
 
                 overrides_data = Some(StatementOverrides::Operation {
                     scope: override_scope,
@@ -613,10 +626,11 @@ impl DataSmart {
             while let Some(stmt_node_index) = walker.next_node(&self.ds) {
                 let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
                 if let Some(o2) = stmt.override_str.as_ref()
-                    && o == o2 {
-                        stmts.push(stmt_node_index);
-                        self.ds.remove_node(stmt_node_index);
-                    }
+                    && o == o2
+                {
+                    stmts.push(stmt_node_index);
+                    self.ds.remove_node(stmt_node_index);
+                }
             }
 
             let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
@@ -878,7 +892,10 @@ impl DataSmart {
         let var_suffix = split_overrides(var_suffix.unwrap_or_default());
         // If an override-style operator is present, then it will never match so return None
         // TODO: what if someone adds one to OVERRIDES?
-        if var_suffix.iter().any(|o| matches!(o.as_str(), "append" | "prepend" | "remove")) {
+        if var_suffix
+            .iter()
+            .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+        {
             return None;
         }
 
@@ -938,11 +955,12 @@ impl DataSmart {
                 // Handle getting the value of a variable override flavor, e.g. `get_var("MY_VAR:a")`.
                 // In that case, pre-filter operations to select those with override strings starting with "a"
                 if !var_suffix.is_empty()
-                    && !original_override.as_ref().is_some_and(|e| {
-                        split_overrides(e).starts_with(var_suffix.as_slice())
-                    }) {
-                        return None;
-                    }
+                    && !original_override
+                        .as_ref()
+                        .is_some_and(|e| split_overrides(e).starts_with(var_suffix.as_slice()))
+                {
+                    return None;
+                }
 
                 let resolved_stmt_kind = {
                     match statement.overrides_data.as_ref() {
@@ -982,7 +1000,15 @@ impl DataSmart {
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
-            .filter(|o| !matches!((parsing, o.stmt.kind), (true, StmtKind::Append | StmtKind::Prepend | StmtKind::Remove)))
+            .filter(|o| {
+                !matches!(
+                    (parsing, o.stmt.kind),
+                    (
+                        true,
+                        StmtKind::Append | StmtKind::Prepend | StmtKind::Remove
+                    )
+                )
+            })
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
                 a.push(b);

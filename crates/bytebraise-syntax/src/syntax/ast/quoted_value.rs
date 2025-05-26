@@ -25,7 +25,10 @@ impl AstToken for QuotedValue {
     where
         Self: Sized,
     {
-        matches!(token, SyntaxKind::DoubleQuotedValue | SyntaxKind::SingleQuotedValue)
+        matches!(
+            token,
+            SyntaxKind::DoubleQuotedValue | SyntaxKind::SingleQuotedValue
+        )
     }
 
     fn cast(syntax: SyntaxToken) -> Option<Self>

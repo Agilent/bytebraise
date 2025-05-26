@@ -1,8 +1,5 @@
 #[cfg(test)]
-use crate::{
-    evaluate::eval,
-    macros::get_var
-};
+use crate::{evaluate::eval, macros::get_var};
 
 #[test]
 fn del_var() {
