@@ -36,7 +36,7 @@ pub fn split_var_value3(s: &str) -> Vec<TextRange> {
             },
         )
         // Whitespace outside of a ${} expression is what separates each value
-        .group_by(|item| item.char.is_whitespace() && (item.inexpr == 0));
+        .chunk_by(|item| item.char.is_whitespace() && (item.inexpr == 0));
 
     let mut ret = vec![];
     for q in &iter {
