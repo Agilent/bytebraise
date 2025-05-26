@@ -807,14 +807,11 @@ impl DataSmart {
 
             let mut name = nodes.0.variable().name.clone();
 
-            // TODO: use overrides_data, not override_str. Then get rid of the latter.
+            // Take all the override str, including any operation (e.g. append)
             if let Some(b) = nodes.1.statement().override_str.clone() {
-                // TODO: more efficient
-                let overrides = split_overrides_without_keywords(&b);
-                if !overrides.is_empty() {
-                    name.push(':');
-                    name.push_str(&overrides.join(":"));
-                }
+                debug_assert!(!b.starts_with(":"));
+                name.push(':');
+                name.push_str(&b);
             }
 
             let expanded = self.expand(&name)?;
@@ -822,7 +819,8 @@ impl DataSmart {
         }
 
         // TODO: BitBake stores override variants as separate variables. So given "TEST:${A}:b:a",
-        //  we also need to produce "TEST:${A}:b", "TEST:${A}" and rename those in this list.
+        //  we also need to produce "TEST:${A}:b", "TEST:${A}" and rename those in this list, i.e.
+        //  anything that still has the ${.
         let ret = operations.keys().cloned().collect_vec();
         for o in operations.into_iter() {
             self.rename_var(o.0, o.1)?;

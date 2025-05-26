@@ -988,16 +988,20 @@ OVERRIDES = "a:b:c"
 
     #[test]
     fn override_score_trickery() {
-        let d = eval(
+        let mut d = eval(
             r#"
 MY_VAR:a = "1"
 MY_VAR:a:b = "2"
 MY_VAR:a:b:a:b = "3"
 MY_VAR:b:a:b:a = "4"
 MY_VAR:a:a:b:b = "5"
+MY_VAR:a:append:${B}:b = "7"
+B = "a"
 OVERRIDES = "a:b:c"
         "#,
         );
+
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "5");
     }
