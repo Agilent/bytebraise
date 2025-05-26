@@ -39,10 +39,12 @@ use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::{DefaultIx, EdgeIndex};
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
+use std::ops::Deref;
 use std::sync::LazyLock;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
@@ -135,22 +137,14 @@ pub struct DataSmart {
 //     Some(ret)
 // }
 
-// TODO: better way?
-static EMPTY_OVERRIDES: LazyLock<IndexSet<String>> = LazyLock::new(IndexSet::new);
-
 type OverrideScore = (Vec<usize>, usize, usize);
 
 fn score_override(
-    active_overrides: &Option<IndexSet<String>>,
+    active_overrides: &Cow<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
 ) -> Option<OverrideScore> {
-    // Reject this override if it contains terms not in active override set
-    let temp_cloned_active_overrides = active_overrides
-        .as_ref()
-        .unwrap_or_else(|| &EMPTY_OVERRIDES);
-
     let c: IndexSet<String> = candidate_overrides.iter().cloned().collect();
-    if !c.is_subset(temp_cloned_active_overrides) {
+    if !c.is_subset(active_overrides) {
         return None;
     }
 
@@ -159,49 +153,47 @@ fn score_override(
         return Some(ret);
     }
 
-    if let Some(active_overrides) = active_overrides {
-        ret = (vec![], 0, 0);
+    ret = (vec![], 0, 0);
 
-        //
-        let mut candidate = candidate_overrides.clone();
+    //
+    let mut candidate = candidate_overrides.clone();
 
-        let counts = candidate_overrides.iter().counts();
-        // Count the # of times
-        ret.0 = active_overrides
-            .iter()
-            .map(|o| counts.get(o).copied().unwrap_or_default())
-            .rev()
-            .collect();
+    let counts = candidate_overrides.iter().counts();
+    // Count the # of times
+    ret.0 = active_overrides
+        .iter()
+        .map(|o| counts.get(o).copied().unwrap_or_default())
+        .rev()
+        .collect();
 
-        // for (i, active_override) in active_overrides.iter().enumerate() {
-        //     if candidate_overrides.contains(active_override) {
-        //         ret.0 |= 1 << i;
-        //     }
-        // }
+    // for (i, active_override) in active_overrides.iter().enumerate() {
+    //     if candidate_overrides.contains(active_override) {
+    //         ret.0 |= 1 << i;
+    //     }
+    // }
 
-        let mut keep_going = true;
-        'outer: while keep_going {
-            keep_going = false;
-            //eprintln!("iteration {}", ret.1);
-            ret.1 += 1;
-            for (ai, active_override) in active_overrides.iter().enumerate() {
-                //eprintln!("\tconsider override {active_override}");
-                if candidate.len() == 1 && &candidate[0] == active_override {
-                    assert_eq!(ret.2, 0);
-                    ret.2 = ai + 1;
-                    break 'outer;
-                } else if candidate.len() > 1
-                    && candidate.ends_with(std::slice::from_ref(active_override))
-                {
-                    let old = candidate.clone();
-                    //eprintln!("{:?}", candidate);
-                    candidate.retain_with_index(|c, i| i == 0 || c != active_override);
+    let mut keep_going = true;
+    'outer: while keep_going {
+        keep_going = false;
+        //eprintln!("iteration {}", ret.1);
+        ret.1 += 1;
+        for (ai, active_override) in active_overrides.iter().enumerate() {
+            //eprintln!("\tconsider override {active_override}");
+            if candidate.len() == 1 && &candidate[0] == active_override {
+                assert_eq!(ret.2, 0);
+                ret.2 = ai + 1;
+                break 'outer;
+            } else if candidate.len() > 1
+                && candidate.ends_with(std::slice::from_ref(active_override))
+            {
+                let old = candidate.clone();
+                //eprintln!("{:?}", candidate);
+                candidate.retain_with_index(|c, i| i == 0 || c != active_override);
 
-                    //eprintln!("\t\ttransform {old:?} => {candidate:?}");
+                //eprintln!("\t\ttransform {old:?} => {candidate:?}");
 
-                    assert_ne!(old, candidate);
-                    keep_going = true;
-                }
+                assert_ne!(old, candidate);
+                keep_going = true;
             }
         }
     }
@@ -237,39 +229,29 @@ enum StatementOverrides {
 impl StatementOverrides {
     fn is_active(
         &self,
-        override_selection_context: &Option<IndexSet<String>>,
-        active_overrides: &Option<IndexSet<String>>,
+        override_selection_context: &Cow<IndexSet<String>>,
+        active_overrides: &Cow<IndexSet<String>>,
     ) -> bool {
-        assert!(override_selection_context.is_some());
-        assert!(active_overrides.is_some());
-
         match self {
             Self::Operation { filter, scope } => {
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+
                 // For scope, consider selection context (active set + direct variant lookup)
-                let lhs_valid = override_selection_context.as_ref().is_none_or(|o2| {
-                    let lhs: IndexSet<String> = scope.iter().cloned().collect();
-                    lhs.is_subset(o2)
-                });
+                let lhs_valid = scope_set.is_subset(override_selection_context);
 
                 // For filter, consider active override set
-                let rhs_valid = active_overrides
-                    .as_ref()
-                    .is_none_or(|o| filter.is_subset(o));
+                let rhs_valid = filter.is_subset(active_overrides);
 
                 rhs_valid && lhs_valid
             }
             Self::PureOverride { scope } => {
-                override_selection_context
-                    .as_ref()
-                    .is_none_or(|active_overrides| {
-                        let overrides: IndexSet<String> = scope.iter().cloned().collect();
-                        overrides.is_subset(active_overrides)
-                    })
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+                scope_set.is_subset(override_selection_context)
             }
         }
     }
 
-    fn score(&self, active_overrides: &Option<IndexSet<String>>) -> Option<OverrideScore> {
+    fn score(&self, active_overrides: &Cow<IndexSet<String>>) -> Option<OverrideScore> {
         // The score is derived from the scope alone
         match self {
             Self::Operation { scope, .. } => score_override(active_overrides, scope),
@@ -917,19 +899,23 @@ impl DataSmart {
         // TODO: this method doesn't handle re-computing overrides!
         self.compute_overrides().unwrap();
 
-        let override_state = &*RefCell::borrow(&self.active_overrides);
+        let override_state = RefCell::borrow(&self.active_overrides);
+        let override_state = match override_state.as_ref() {
+            Some(state) => Cow::Borrowed(state),
+            None => Cow::Owned(IndexSet::new()),
+        };
 
         // The union of active overrides with whatever overrides were provided in the
         // direct-variant lookup. This is only used for override-scoped operators.
-        let override_selection_context: Option<IndexSet<String>> = match var_suffix.is_empty() {
+        let override_selection_context: Cow<IndexSet<String>> = match var_suffix.is_empty() {
             false => {
                 // TODO: revisit: are we sure the new overrides should be inserted into the beginning?
                 let mut new_overrides = IndexSet::from_iter(var_suffix.clone());
-                for old_override in override_state.clone().unwrap_or_default() {
-                    new_overrides.insert(old_override);
+                for old_override in override_state.deref() {
+                    new_overrides.insert(old_override.clone());
                 }
 
-                Some(new_overrides)
+                Cow::Owned(new_overrides)
             }
             true => override_state.clone(),
         };
@@ -965,7 +951,7 @@ impl DataSmart {
                 let resolved_stmt_kind = {
                     match statement.overrides_data.as_ref() {
                         Some(o @ StatementOverrides::Operation { scope, filter }) => {
-                            if !o.is_active(&override_selection_context, override_state) {
+                            if !o.is_active(&override_selection_context, &override_state) {
                                 return None;
                             }
 
@@ -977,7 +963,7 @@ impl DataSmart {
                             }
                         }
                         Some(o @ StatementOverrides::PureOverride { scope: overrides }) => {
-                            if !o.is_active(&override_selection_context, override_state) {
+                            if !o.is_active(&override_selection_context, &override_state) {
                                 return None;
                             }
 
@@ -1249,6 +1235,7 @@ mod test {
     use crate::macros::get_var;
     use crate::petgraph2::{DataSmart, score_override};
     use indexmap::IndexSet;
+    use std::borrow::Cow;
 
     fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
         let input = input.as_ref().replace(':', "");
@@ -1256,7 +1243,7 @@ mod test {
             vec!["a", "b", "c"].drain(..).map(String::from).collect();
 
         let candidate: Vec<String> = input.chars().map(String::from).collect();
-        let ret = score_override(&Some(active_overrides.clone()), &candidate).unwrap();
+        let ret = score_override(&Cow::Borrowed(&active_overrides), &candidate).unwrap();
 
         eprintln!("{input} => {ret:?}");
 
