@@ -138,6 +138,15 @@ pub struct DataSmart {
 
 type OverrideScore = (Vec<usize>, usize, usize);
 
+// For OVERRIDES = "a:b:c",
+//
+// ab => ([0, 1, 1], 2, 1)
+// ba => ([0, 1, 1], 1, 2)
+// aba => ([0, 1, 2], 2, 1)
+// bab => ([0, 2, 1], 2, 2)
+// aabb => ([0, 2, 2], 3, 1)
+// abab => ([0, 2, 2], 3, 1)
+// baba => ([0, 2, 2], 2, 2)
 fn score_override(
     active_overrides: &Cow<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
@@ -171,20 +180,25 @@ fn score_override(
         // Keep track of the # of times it takes to go through the loop. This is the first
         // tiebreaker for ordering.
         ret.1 += 1;
-        for (ai, active_override) in active_overrides.iter().enumerate() {
-            //eprintln!("\tconsider override {active_override}");
-            if candidate.len() == 1 && &candidate[0] == active_override {
-                assert_eq!(ret.2, 0);
-                ret.2 = ai + 1;
-                break 'outer;
-            } else if candidate.len() > 1
-                && candidate.ends_with(std::slice::from_ref(active_override))
-            {
-                let old = candidate.clone();
-                candidate.retain_with_index(|c, i| i == 0 || c != active_override);
 
-                assert_ne!(old, candidate);
+        for (override_index, active_override) in active_overrides.iter().enumerate() {
+            eprintln!(
+                "\tconsider override {active_override}, left: {}",
+                candidate.join("")
+            );
+
+            // Has to be len() > 1 because we are emulating checking for :<override>.
+            if candidate.len() > 1 && candidate.ends_with(std::slice::from_ref(active_override)) {
+                // This emulates:  active[a.replace(":" + o, "")] = t
+                // Note the original BitBake code unintentionally(?) removes all existences of the
+                // override, not just the one in tail position.
+                candidate.retain_with_index(|c, i| i == 0 || c != active_override);
                 keep_going = true;
+            } else if candidate.len() == 1 && &candidate[0] == active_override {
+                assert_eq!(ret.2, 0);
+                // Final (least-significant) tiebreaker is index of the override on which we stopped
+                ret.2 = override_index + 1;
+                break 'outer;
             }
         }
     }
@@ -1606,7 +1620,11 @@ A .= "5"
         score("ab");
         score("ba");
         score("aba");
-
+        score("bab");
+        score("aabb");
+        score("abab");
+        score("baba");
+        panic!();
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
@@ -2199,5 +2217,21 @@ OVERRIDES = "a:b:c"
 
         assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "different!?");
         assert_eq!(get_var!(&d, "MY_VAR:a").unwrap(), "different!");
+    }
+
+    #[test]
+    fn override_score_trickery() {
+        let d = eval(
+            r#"
+MY_VAR:a = "1"
+MY_VAR:a:b = "2"
+MY_VAR:a:b:a:b = "3"
+MY_VAR:b:a:b:a = "4"
+MY_VAR:a:a:b:b = "5"
+OVERRIDES = "a:b:c"
+        "#,
+        );
+
+        assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "5");
     }
 }
