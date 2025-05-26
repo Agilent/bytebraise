@@ -45,7 +45,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::ops::Deref;
-use std::sync::LazyLock;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -153,29 +152,24 @@ fn score_override(
         return Some(ret);
     }
 
-    ret = (vec![], 0, 0);
-
-    //
-    let mut candidate = candidate_overrides.clone();
-
     let counts = candidate_overrides.iter().counts();
-    // Count the # of times
+    // Overrides (in `active_overrides`) are listed in priority order, from lowest to highest.
+    // Count the # of times each override appears in the given list, then reverse the list so that
+    // higher-priority counts come first.
     ret.0 = active_overrides
         .iter()
         .map(|o| counts.get(o).copied().unwrap_or_default())
         .rev()
         .collect();
 
-    // for (i, active_override) in active_overrides.iter().enumerate() {
-    //     if candidate_overrides.contains(active_override) {
-    //         ret.0 |= 1 << i;
-    //     }
-    // }
+    let mut candidate = candidate_overrides.clone();
 
     let mut keep_going = true;
     'outer: while keep_going {
         keep_going = false;
-        //eprintln!("iteration {}", ret.1);
+
+        // Keep track of the # of times it takes to go through the loop. This is the first
+        // tiebreaker for ordering.
         ret.1 += 1;
         for (ai, active_override) in active_overrides.iter().enumerate() {
             //eprintln!("\tconsider override {active_override}");
@@ -187,10 +181,7 @@ fn score_override(
                 && candidate.ends_with(std::slice::from_ref(active_override))
             {
                 let old = candidate.clone();
-                //eprintln!("{:?}", candidate);
                 candidate.retain_with_index(|c, i| i == 0 || c != active_override);
-
-                //eprintln!("\t\ttransform {old:?} => {candidate:?}");
 
                 assert_ne!(old, candidate);
                 keep_going = true;
