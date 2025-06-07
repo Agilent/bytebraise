@@ -4,6 +4,13 @@ use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::DefaultIx;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
+pub enum OverrideOperation {
+    Append,
+    Prepend,
+    Remove
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 pub enum StmtKind {
     WeakDefault,
     Default,
@@ -12,6 +19,7 @@ pub enum StmtKind {
     EqualPlus,
     DotEqual,
     EqualDot,
+
     // TODO: you can have :append +=, etc. so maybe maybe 'append', 'prepend', 'remove' modifiers
     //  instead of their own kind?
     Append,

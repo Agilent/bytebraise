@@ -85,7 +85,9 @@
 //! See the later section on the override score algorithm for all the gory details. It gets messy.
 pub mod errors;
 pub mod evaluate;
+pub mod keys_iter;
 pub mod macros;
 pub mod petgraph2;
 mod tests;
 pub mod variable_operation;
+pub(crate) mod nodes;

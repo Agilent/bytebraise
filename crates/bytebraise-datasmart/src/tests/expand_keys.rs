@@ -28,7 +28,8 @@ B = "T"
         "#,
     );
 
-    d.expand_keys().unwrap();
+    let todolist = d.expand_keys().unwrap();
+    assert_eq!(todolist, vec!["TES${B}".to_string()]);
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "abc");
 }

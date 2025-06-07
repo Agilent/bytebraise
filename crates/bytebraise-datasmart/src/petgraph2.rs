@@ -23,6 +23,7 @@ Major todos:
 */
 
 use crate::errors::{DataSmartError, DataSmartResult};
+use crate::keys_iter::KeysIter;
 use crate::macros::get_var;
 use crate::variable_operation::{StmtKind, VariableOperation};
 use anyhow::bail;
@@ -34,17 +35,20 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
+use petgraph::data::DataMap;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::{DefaultIx, EdgeIndex};
 use regex::{Captures, Regex};
-use scopeguard::{ScopeGuard, defer, guard};
+use scopeguard::{defer, guard, ScopeGuard};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::ops::Deref;
+use tracing::{event, Level};
+use crate::nodes::{GraphItem, StmtNode};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -78,63 +82,6 @@ pub struct DataSmart {
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
 }
-
-// fn score_overrides2(
-//     active_overrides: impl IntoIterator<Item = String>,
-//     candidate_overrides: &Vec<String>,
-// ) -> Option<(Vec<usize>, usize, usize)> {
-//     let active_overrides = active_overrides.into_iter();
-//
-//     if candidate_overrides.is_empty() {
-//         return Some((vec![], 0, 0));
-//     }
-//
-//     let mut ret = (
-//         std::iter::repeat_n(0, active_overrides.len()).collect(),
-//         0,
-//         0,
-//     );
-//
-//     let mut candidate = candidate_overrides.clone();
-//
-//     let counts = candidate_overrides.iter().counts();
-//     ret.0 = active_overrides
-//         .map(|o| counts.get(o).copied().unwrap_or_default())
-//         .rev()
-//         .collect();
-//
-//     // for (i, active_override) in active_overrides.iter().enumerate() {
-//     //     if candidate_overrides.contains(active_override) {
-//     //         ret.0 |= 1 << i;
-//     //     }
-//     // }
-//
-//     let mut keep_going = true;
-//     'outer: while keep_going {
-//         keep_going = false;
-//         //eprintln!("iteration {}", ret.1);
-//         ret.1 += 1;
-//         for (ai, active_override) in active_overrides.enumerate() {
-//             //eprintln!("\tconsider override {active_override}");
-//             if candidate.len() == 1 && candidate[0] == active_override {
-//                 assert_eq!(ret.2, 0);
-//                 ret.2 = ai + 1;
-//                 break 'outer;
-//             } else if candidate.len() > 1 && candidate.ends_with(&[active_override.clone()]) {
-//                 let old = candidate.clone();
-//                 //eprintln!("{:?}", candidate);
-//                 candidate.retain_with_index(|c, i| i == 0 || *c != active_override);
-//
-//                 //eprintln!("\t\ttransform {old:?} => {candidate:?}");
-//
-//                 assert_ne!(old, candidate);
-//                 keep_going = true;
-//             }
-//         }
-//     }
-//
-//     Some(ret)
-// }
 
 type OverrideScore = (Vec<usize>, usize, usize);
 
@@ -182,10 +129,10 @@ pub(crate) fn score_override(
         ret.1 += 1;
 
         for (override_index, active_override) in active_overrides.iter().enumerate() {
-            eprintln!(
-                "\tconsider override {active_override}, left: {}",
-                candidate.join("")
-            );
+            // eprintln!(
+            //     "\tconsider override {active_override}, left: {}",
+            //     candidate.join("")
+            // );
 
             // Has to be len() > 1 because we are emulating checking for :<override>.
             if candidate.len() > 1 && candidate.ends_with(std::slice::from_ref(active_override)) {
@@ -220,7 +167,7 @@ fn split_overrides_without_keywords<S: AsRef<str>>(input: S) -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum StatementOverrides {
+pub(crate) enum StatementOverrides {
     Operation {
         scope: Vec<String>,
         filter: IndexSet<String>,
@@ -406,7 +353,7 @@ impl DataSmart {
         let var = var.into();
         let value = value.into();
 
-        dbg!(&var);
+        //dbg!(&var);
 
         let var_parts = var.split_once(':');
         let base = var_parts.map_or(var.as_str(), |parts| parts.0);
@@ -505,7 +452,8 @@ impl DataSmart {
         *var_entry
     }
 
-    pub fn set_var<T: Into<String>, S: Into<String>>(
+    #[tracing::instrument(skip(self), ret)]
+    pub fn set_var<T: Into<String> + Debug, S: Into<String> + Debug>(
         &mut self,
         var: T,
         value: S,
@@ -592,7 +540,8 @@ impl DataSmart {
         Ok(value)
     }
 
-    pub fn del_var<S: AsRef<str>>(&mut self, var: S) -> DataSmartResult<()> {
+    #[tracing::instrument(skip(self), ret)]
+    pub fn del_var<S: AsRef<str> + Debug>(&mut self, var: S) -> DataSmartResult<()> {
         let var = var.as_ref();
         let (base_var, overrides) = var
             .split_once(':')
@@ -644,6 +593,7 @@ impl DataSmart {
                     .ds
                     .neighbors_directed(var_index, Direction::Outgoing)
                     .detach();
+
                 while let Some(stmt_node_index) = walker.next_node(&self.ds) {
                     // Only delete the statement if another variable isn't using it
 
@@ -685,7 +635,8 @@ impl DataSmart {
     /// Variable key TESQ:${A} (a) replaces original key TESQ:A (1).
     /// renameVar(TESQ:${A}, TESQ:A)
 
-    pub fn rename_var<A: AsRef<str>, B: AsRef<str>>(
+    #[tracing::instrument(skip(self), ret)]
+    pub fn rename_var<A: AsRef<str> + Debug, B: AsRef<str> + Debug>(
         &mut self,
         old: A,
         new: B,
@@ -696,23 +647,20 @@ impl DataSmart {
         let old_base_var = old.split_once(':').map_or(old, |p| p.0);
         let new_base_var = new.split_once(':').map_or(new, |p| p.0);
 
-        eprintln!("renameVar({old}, {new})");
-        eprintln!("vars before call: {}", self.vars.keys().sorted().join(", "));
-
         if old == new {
             bail!("Calling renameVar with equivalent keys {old} is invalid");
         }
 
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
-            eprintln!("getVar({old}) = {old_val}");
-            eprintln!("setVar({new}, {old_val}");
             // TODO: parsing mode?
             self.set_var(new, old_val);
         }
 
         // Next, transplant :appends, :prepends, and :removes
         let new_var_index = *self.vars.get(new_base_var).unwrap();
+        //dbg!(&old_base_var);
+        //dbg!(&self.vars);
         let old_var_index = *self.vars.get(old_base_var).unwrap();
 
         if new_var_index != old_var_index {
@@ -733,16 +681,11 @@ impl DataSmart {
                     _ => continue,
                 }
             }
-        } else {
-            eprintln!("bypass");
         }
 
         //dbg!(&self.ds);
 
-        eprintln!("del_var({old})");
         self.del_var(old)?;
-
-        eprintln!("vars after call: {}", self.vars.keys().sorted().join(", "));
 
         Ok(())
     }
@@ -792,38 +735,58 @@ impl DataSmart {
     ///     1. Transfer operations from VA${V} node onto the VAR node.
     ///     2. Delete VA${V} node.
     ///
+    #[tracing::instrument(skip_all)]
     pub fn expand_keys(&mut self) -> DataSmartResult<Vec<String>> {
         let mut unexpanded_operations = std::mem::take(&mut self.unexpanded_operations);
-        dbg!(&unexpanded_operations);
+        //dbg!(&unexpanded_operations);
 
         let mut operations = BTreeMap::new();
 
         // TODO: if not all 'override' operations, then need to actually do renameKey?
-
         // Reconstruct the unexpanded keys
         for edge in unexpanded_operations.drain() {
             let node = self.ds.edge_endpoints(edge).unwrap();
             let nodes = self.ds.index_twice_mut(node.0, node.1);
 
-            let mut name = nodes.0.variable().name.clone();
+            let mut var_parts = vec![nodes.0.variable().name.clone()];
 
             // Take all the override str, including any operation (e.g. append)
             if let Some(b) = nodes.1.statement().override_str.clone() {
                 debug_assert!(!b.starts_with(":"));
-                name.push(':');
-                name.push_str(&b);
+                var_parts.extend(split_overrides(&b));
             }
 
-            let expanded = self.expand(&name)?;
-            operations.insert(name, expanded);
+            while !var_parts.is_empty() {
+                let last = var_parts.last().unwrap().as_str();
+                if !matches!(last, "append" | "prepend" | "remove") {
+                    let new_var = var_parts.join(":");
+                    if new_var.contains("${") {
+                        let expanded = self.expand(&new_var)?;
+                        operations.insert(new_var, expanded);
+                    } else {
+                        break;
+                    }
+                }
+
+                var_parts.pop();
+            }
         }
 
-        // TODO: BitBake stores override variants as separate variables. So given "TEST:${A}:b:a",
-        //  we also need to produce "TEST:${A}:b", "TEST:${A}" and rename those in this list, i.e.
-        //  anything that still has the ${.
+        tracing::info!("{:?}", &operations);
+
         let ret = operations.keys().cloned().collect_vec();
         for o in operations.into_iter() {
             self.rename_var(o.0, o.1)?;
+        }
+
+        // Sanity check: did we actually expand everything?
+        // TODO: will only be expanded if the referenced variables actually exist
+        for stmt in self.ds.node_weights() {
+            if let GraphItem::StmtNode(stmt) = stmt {
+                if let Some(o) = stmt.override_str.as_ref() {
+                    assert!(!o.contains("${"));
+                }
+            }
         }
 
         Ok(ret)
@@ -865,7 +828,13 @@ impl DataSmart {
         Ok(())
     }
 
-    pub fn get_var<S: AsRef<str>>(&self, var: S, parsing: bool, expand: bool) -> Option<String> {
+    #[tracing::instrument(skip(self), ret)]
+    pub fn get_var<S: AsRef<str> + Debug>(
+        &self,
+        var: S,
+        parsing: bool,
+        expand: bool,
+    ) -> Option<String> {
         let var = var.as_ref();
         //dbg!(var);
         // `var_base` is the root/stem part of the variable without any overrides
@@ -989,22 +958,29 @@ impl DataSmart {
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
             })
+            .inspect(|o| {
+                //dbg!(o);
+            })
             .filter(|o| {
-                !matches!(
+                let ret = !matches!(
                     (parsing, o.stmt.kind),
                     (
                         true,
                         StmtKind::Append | StmtKind::Prepend | StmtKind::Remove
                     )
-                )
+                );
+
+                if !ret {
+                    tracing::info!("in parsing mode, so dumping");
+                }
+
+                ret
             })
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
                 a.push(b);
                 a
             });
-
-        //dbg!(&resolved_variable_operations);
 
         // eprintln!("SCORING: ");
         // for item in resolved_variable_operations.heap.iter() {
@@ -1142,92 +1118,37 @@ impl DataSmart {
 
         Some(ret.to_string())
     }
-}
 
-#[derive(Debug)]
-struct Variable {
-    name: String,
-    operations: FifoHeap<VariableOperation>,
-    cached_value: RefCell<Option<String>>,
-    // map of varflag name => heap of operations
-    // for example, in:
-    //   A[depends] = "q'
-    // the varflag name is 'depends', and a single operation is added to assign "q"
+    pub fn get_all_keys(&self) -> Vec<String> {
+        let mut ret = HashSet::new();
 
-    // TODO: unlike with the implicit _content vargflag (which is covered by the first-class citizen
-    //  `operations`), varflag operations do not care about `OVERRIDES`. However, we still make use of
-    //  the operation lhs, since you can do stuff like this:
-    //      A[depends] = "q"
-    //      A:pn-specific[depends] = "d"
-    //  Calling get_var_flag on "A" in the context of 'specific' recipe does NOT however return "d".
-    //  Calling get_var_flag "A:pn-specific" does give "d", however.
-    //  This is kind of confusiong, so perhaps we shouldn't blinding re-use `VariableOperation` here,
-    //  since the semantics are so different.
-    varflags: BTreeMap<String, FifoHeap<VariableOperation>>, // TODO: iterative cache for OVERRIDES
-}
+        for var in &self.vars {
+            // Add base variable
+            ret.insert(var.0.clone());
 
-#[derive(Debug, PartialEq, Eq)]
-struct StmtNode {
-    kind: StmtKind,
+            // Iterate over statements
+            let var_node = self.ds.node_weight(*var.1).unwrap().variable();
+            for stmt in var_node.operations.iter() {
+                let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
 
-    override_str: Option<String>,
-
-    overrides_data: Option<StatementOverrides>,
-
-    /// The value
-    rhs: String,
-}
-
-#[derive(Debug)]
-enum GraphItem {
-    Variable(Variable),
-    StmtNode(StmtNode),
-}
-
-impl GraphItem {
-    fn variable_mut(&mut self) -> &mut Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
+                match stmt_node.overrides_data.as_ref() {
+                    None => continue,
+                    Some(o) => {
+                        dbg!(&stmt_node);
+                        match o {
+                            StatementOverrides::Operation { scope, filter } => {}
+                            StatementOverrides::PureOverride { .. } => {}
+                        }
+                    }
+                }
+            }
         }
+
+        ret.into_iter().collect_vec()
     }
 
-    fn variable(&self) -> &Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
-        }
-    }
-
-    fn to_variable(self) -> Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
-        }
-    }
-
-    fn statement(&self) -> &StmtNode {
-        match self {
-            GraphItem::StmtNode(stmt) => stmt,
-            _ => panic!("Expected GraphItem::Statement"),
-        }
-    }
-
-    fn statement_mut(&mut self) -> &mut StmtNode {
-        match self {
-            GraphItem::StmtNode(stmt) => stmt,
-            _ => panic!("Expected GraphItem::Statement"),
-        }
+    pub fn keys(&self) -> KeysIter {
+        KeysIter {}
     }
 }
 
-impl GraphItem {
-    fn new_variable<T: Into<String>>(name: T) -> GraphItem {
-        GraphItem::Variable(Variable {
-            name: name.into(),
-            operations: FifoHeap::new(),
-            cached_value: RefCell::new(None),
-            varflags: BTreeMap::new(),
-        })
-    }
-}

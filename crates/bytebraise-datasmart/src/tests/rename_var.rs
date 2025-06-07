@@ -168,3 +168,38 @@ T = "T"
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "b2");
 }
+
+#[test_log::test]
+fn rename_1() {
+    let mut d = eval(
+        r#"
+TEST = "b"
+TEST:${A}:append = "2"
+A = "a"
+OVERRIDES = "a"
+    "#,
+    );
+
+    d.expand_keys().unwrap();
+
+    dbg!(&d);
+
+    assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
+}
+
+#[test_log::test]
+fn rename_2() {
+    let mut d = eval(
+        r#"
+TEST:${A}:append = "2"
+A = "a"
+OVERRIDES = "a"
+    "#,
+    );
+
+    d.expand_keys().unwrap();
+
+    dbg!(&d);
+
+    assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
+}
