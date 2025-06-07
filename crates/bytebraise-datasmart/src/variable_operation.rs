@@ -7,7 +7,7 @@ use petgraph::stable_graph::DefaultIx;
 pub enum OverrideOperation {
     Append,
     Prepend,
-    Remove
+    Remove,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
@@ -19,9 +19,6 @@ pub enum StmtKind {
     EqualPlus,
     DotEqual,
     EqualDot,
-
-    // TODO: you can have :append +=, etc. so maybe maybe 'append', 'prepend', 'remove' modifiers
-    //  instead of their own kind?
     Append,
     Prepend,
     Remove,

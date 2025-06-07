@@ -83,11 +83,18 @@
 //! active override. So the override score for `:c` is the highest, whereas that of `:a` is the lowest.
 //!
 //! See the later section on the override score algorithm for all the gory details. It gets messy.
+//!
+//! ## BitBake internals
+//!
+//! ### remove, prepend, append
+//! These are stored as varflags on the target variable. However, if unexpanded (i.e. contains '${')
+//! then no varflag is added. See DataSmart::setVar and `__setvar_regexp__`.
+//!
 pub mod errors;
 pub mod evaluate;
 pub mod keys_iter;
 pub mod macros;
+pub(crate) mod nodes;
 pub mod petgraph2;
 mod tests;
 pub mod variable_operation;
-pub(crate) mod nodes;

@@ -1,5 +1,6 @@
 mod del_var;
 mod expand_keys;
+mod mixed_operators;
 mod rename_var;
 
 #[cfg(test)]

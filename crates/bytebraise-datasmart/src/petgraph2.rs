@@ -25,6 +25,7 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::get_var;
+use crate::nodes::{GraphItem, StmtNode};
 use crate::variable_operation::{StmtKind, VariableOperation};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
@@ -40,15 +41,14 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::{DefaultIx, EdgeIndex};
 use regex::{Captures, Regex};
-use scopeguard::{defer, guard, ScopeGuard};
+use scopeguard::{ScopeGuard, defer, guard};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::ops::Deref;
-use tracing::{event, Level};
-use crate::nodes::{GraphItem, StmtNode};
+use tracing::{Level, event};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -349,9 +349,9 @@ impl DataSmart {
         var: T,
         value: S,
         mut stmt_kind: Option<StmtKind>,
-    ) -> NodeIndex<DefaultIx> {
+    ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
-        let value = value.into();
+        let mut value = value.into();
 
         //dbg!(&var);
 
@@ -368,26 +368,40 @@ impl DataSmart {
                 .captures_read(&mut locs, override_str)
                 .is_some()
             {
-                match stmt_kind.as_ref() {
-                    None | Some(StmtKind::Assign) => { /* fine */ }
-                    Some(_) => {
-                        todo!("append/prepend/remove combined with operators");
-                    }
-                }
-
                 let keyword_pos = locs.get(1).unwrap();
-                match &override_str[keyword_pos.0..keyword_pos.1] {
-                    "append" => {
-                        stmt_kind = Some(StmtKind::Append);
-                    }
-                    "prepend" => {
-                        stmt_kind = Some(StmtKind::Prepend);
-                    }
-                    "remove" => {
-                        stmt_kind = Some(StmtKind::Remove);
-                    }
+                let override_style_kind = match &override_str[keyword_pos.0..keyword_pos.1] {
+                    "append" => StmtKind::Append,
+                    "prepend" => StmtKind::Prepend,
+                    "remove" => StmtKind::Remove,
                     _ => unreachable!(),
                 };
+
+                // TODO: BitBake gives a warning when mixing these operators
+                match stmt_kind.as_ref() {
+                    Some(StmtKind::WeakDefault) => {
+                        // In BitBake, remove, append, prepend are implemented as varflags. However, ??=
+                        // is implemented with the _defaultval varflag. So using ??= causes assignment
+                        // to the '_defaultval' varflag of the var name, e.g. TEST:remove. This is not
+                        // observable, since you can't do `getVar("TEST:remove")`. So just ignore.
+                        return None;
+                    }
+                    Some(StmtKind::PlusEqual) if override_style_kind != StmtKind::Remove => {
+                        // 'remove' is whitespace delimited, so don't bother adding space.
+                        value = format!(" {value}");
+                    }
+                    Some(StmtKind::EqualPlus) if override_style_kind != StmtKind::Remove => {
+                        // 'remove' is whitespace delimited, so don't bother adding space.
+                        value = format!("{value} ");
+                    }
+                    // TODO: set_var_ex should take a different enum that is a subset of StmtKind,
+                    //  without append, prepend, remove.
+                    Some(StmtKind::Append) => unreachable!(),
+                    Some(StmtKind::Prepend) => unreachable!(),
+                    Some(StmtKind::Remove) => unreachable!(),
+                    _ => { /* everything else is handled no differently */ }
+                }
+
+                stmt_kind = Some(override_style_kind);
 
                 // Overrides before the keyword - unconditionally applied, depending on the
                 // start value that is selected
@@ -449,7 +463,7 @@ impl DataSmart {
             self.unexpanded_operations.insert(e);
         }
 
-        *var_entry
+        Some(*var_entry)
     }
 
     #[tracing::instrument(skip(self), ret)]
@@ -457,7 +471,7 @@ impl DataSmart {
         &mut self,
         var: T,
         value: S,
-    ) -> NodeIndex<DefaultIx> {
+    ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
         let value = value.into();
 
@@ -1151,4 +1165,3 @@ impl DataSmart {
         KeysIter {}
     }
 }
-

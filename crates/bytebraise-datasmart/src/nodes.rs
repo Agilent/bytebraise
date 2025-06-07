@@ -1,8 +1,8 @@
+use crate::petgraph2::StatementOverrides;
+use crate::variable_operation::{StmtKind, VariableOperation};
 use bytebraise_util::fifo_heap::FifoHeap;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use crate::petgraph2::StatementOverrides;
-use crate::variable_operation::{StmtKind, VariableOperation};
 
 #[derive(Debug)]
 pub(crate) struct Variable {
@@ -59,7 +59,7 @@ impl GraphItem {
         }
     }
 
-    pub(crate)fn to_variable(self) -> Variable {
+    pub(crate) fn to_variable(self) -> Variable {
         match self {
             GraphItem::Variable(v) => v,
             _ => panic!("Expected GraphItem::Variable"),
