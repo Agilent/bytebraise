@@ -13,6 +13,7 @@ bytebraise-util = { path = "../bytebraise-util", version = "0.1.0" }
 bytebraise-syntax = { path = "../bytebraise-syntax", version = "0.1.0" }
 bytebraise-datasmart-macros = { path = "../bytebraise-datasmart-macros", version = "0.1.0" }
 default-args = "1"
+derive_more = "2"
 thiserror = "2"
 petgraph = "0.8.1"
 fxhash = "0.2.1"

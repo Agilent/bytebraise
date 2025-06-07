@@ -1,7 +1,12 @@
-use crate::petgraph2::StatementOverrides;
-use crate::variable_operation::{StmtKind, VariableOperation};
+use crate::petgraph2;
+use crate::petgraph2::OverrideScore;
+use crate::variable_operation::{Operator, OverrideOperator, VariableOperation};
 use bytebraise_util::fifo_heap::FifoHeap;
+use indexmap::IndexSet;
+use petgraph::graph::NodeIndex;
+use std::borrow::Cow;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
@@ -28,11 +33,11 @@ pub(crate) struct Variable {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct StmtNode {
-    pub(crate) kind: StmtKind,
-
+    // TODO: remove? can be computed from StatementKind
     pub(crate) override_str: Option<String>,
 
-    pub(crate) overrides_data: Option<StatementOverrides>,
+    pub(crate) operator: Operator,
+    pub(crate) kind: StatementKind,
 
     /// The value
     pub(crate) rhs: String,
@@ -89,5 +94,85 @@ impl GraphItem {
             cached_value: RefCell::new(None),
             varflags: BTreeMap::new(),
         })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum StatementKind {
+    Operation {
+        scope: Vec<String>,
+        override_operator: OverrideOperator,
+        filter: IndexSet<String>,
+    },
+    PureOverride {
+        scope: Vec<String>,
+    },
+    Unconditional,
+}
+
+impl StatementKind {
+    pub(crate) fn is_active(
+        &self,
+        override_selection_context: &Cow<IndexSet<String>>,
+        active_overrides: &Cow<IndexSet<String>>,
+    ) -> bool {
+        match self {
+            Self::Operation { filter, scope, .. } => {
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+
+                // For scope, consider selection context (active set + direct variant lookup)
+                let lhs_valid = scope_set.is_subset(override_selection_context);
+
+                // For filter, consider active override set
+                let rhs_valid = filter.is_subset(active_overrides);
+
+                rhs_valid && lhs_valid
+            }
+            Self::PureOverride { scope } => {
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+                scope_set.is_subset(override_selection_context)
+            }
+            // TODO?
+            Self::Unconditional => true,
+        }
+    }
+
+    pub(crate) fn score(&self, active_overrides: &Cow<IndexSet<String>>) -> Option<OverrideScore> {
+        // The score is derived from the scope alone
+        match self {
+            Self::Operation { scope, .. } => petgraph2::score_override(active_overrides, scope),
+            Self::PureOverride { scope } => petgraph2::score_override(active_overrides, scope),
+            Self::Unconditional => Some((vec![], 0, 0)),
+        }
+    }
+
+    pub(crate) fn override_scope(&self) -> Vec<String> {
+        match self {
+            StatementKind::Unconditional => Vec::new(),
+            StatementKind::Operation { scope, .. } => scope.clone(),
+            StatementKind::PureOverride { scope } => scope.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ScoredOperation<'a> {
+    pub(crate) score: OverrideScore,
+    pub(crate) stmt: &'a StmtNode,
+    pub(crate) stmt_index: NodeIndex,
+}
+
+impl<'a> Ord for ScoredOperation<'a> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score
+            .cmp(&other.score)
+            .reverse()
+            .then(self.stmt.operator.cmp(&other.stmt.operator))
+    }
+}
+
+impl<'a> PartialOrd for ScoredOperation<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }

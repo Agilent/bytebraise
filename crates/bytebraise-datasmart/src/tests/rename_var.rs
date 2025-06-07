@@ -67,7 +67,7 @@ B = "ST:appen"
     assert_eq!(get_var!(&d, "TEST").unwrap(), "bCA");
 }
 
-#[test]
+#[test_log::test]
 fn rename_append_4() {
     let mut d = eval(
         r#"

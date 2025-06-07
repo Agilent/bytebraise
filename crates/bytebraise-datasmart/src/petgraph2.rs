@@ -25,8 +25,10 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::get_var;
-use crate::nodes::{GraphItem, StmtNode};
-use crate::variable_operation::{StmtKind, VariableOperation};
+use crate::nodes::{
+    GraphItem, ScoredOperation, StatementKind, StmtNode,
+};
+use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
@@ -83,7 +85,7 @@ pub struct DataSmart {
     inside_compute_overrides: RefCell<()>,
 }
 
-type OverrideScore = (Vec<usize>, usize, usize);
+pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
 
 // For OVERRIDES = "a:b:c",
 //
@@ -94,6 +96,7 @@ type OverrideScore = (Vec<usize>, usize, usize);
 // aabb => ([0, 2, 2], 3, 1)
 // abab => ([0, 2, 2], 3, 1)
 // baba => ([0, 2, 2], 2, 2)
+#[tracing::instrument(ret)]
 pub(crate) fn score_override(
     active_overrides: &Cow<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
@@ -159,118 +162,6 @@ fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
         .collect()
 }
 
-fn split_overrides_without_keywords<S: AsRef<str>>(input: S) -> Vec<String> {
-    split_overrides(input)
-        .into_iter()
-        .filter(|o| !matches!(o.as_str(), "append" | "prepend" | "remove"))
-        .collect()
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum StatementOverrides {
-    Operation {
-        scope: Vec<String>,
-        filter: IndexSet<String>,
-        // TODO: move operation type into here?
-    },
-    PureOverride {
-        scope: Vec<String>,
-    },
-}
-
-impl StatementOverrides {
-    fn is_active(
-        &self,
-        override_selection_context: &Cow<IndexSet<String>>,
-        active_overrides: &Cow<IndexSet<String>>,
-    ) -> bool {
-        match self {
-            Self::Operation { filter, scope } => {
-                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
-
-                // For scope, consider selection context (active set + direct variant lookup)
-                let lhs_valid = scope_set.is_subset(override_selection_context);
-
-                // For filter, consider active override set
-                let rhs_valid = filter.is_subset(active_overrides);
-
-                rhs_valid && lhs_valid
-            }
-            Self::PureOverride { scope } => {
-                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
-                scope_set.is_subset(override_selection_context)
-            }
-        }
-    }
-
-    fn score(&self, active_overrides: &Cow<IndexSet<String>>) -> Option<OverrideScore> {
-        // The score is derived from the scope alone
-        match self {
-            Self::Operation { scope, .. } => score_override(active_overrides, scope),
-            Self::PureOverride { scope } => score_override(active_overrides, scope),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum ResolvedStatementKind {
-    Operation {
-        scope: Vec<String>,
-        filter: IndexSet<String>,
-        score: OverrideScore,
-    },
-    PureOverride {
-        scope: Vec<String>,
-        score: OverrideScore,
-    },
-    Unconditional,
-}
-
-impl ResolvedStatementKind {
-    fn override_score(&self) -> OverrideScore {
-        match self {
-            Self::Unconditional => (vec![], 0, 0),
-            Self::Operation { score, .. } => score.clone(),
-            Self::PureOverride { score, .. } => score.clone(),
-        }
-    }
-
-    fn override_scope(&self) -> Vec<String> {
-        match self {
-            Self::Unconditional => vec![],
-            Self::Operation { scope, .. } => scope.clone(),
-            Self::PureOverride { scope, .. } => scope.clone(),
-        }
-    }
-
-    fn is_override_operation(&self) -> bool {
-        matches!(self, Self::Operation { .. })
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct ResolvedVariableOperation<'a> {
-    kind: ResolvedStatementKind,
-    stmt: &'a StmtNode,
-    stmt_index: NodeIndex,
-}
-
-impl<'a> Ord for ResolvedVariableOperation<'a> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.kind
-            .override_score()
-            .cmp(&other.kind.override_score())
-            .reverse()
-            .then(self.stmt.kind.cmp(&other.stmt.kind))
-    }
-}
-
-impl<'a> PartialOrd for ResolvedVariableOperation<'a> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Default for DataSmart {
     fn default() -> Self {
         Self::new()
@@ -321,37 +212,36 @@ impl DataSmart {
     }
 
     pub fn plus_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::PlusEqual));
+        self.set_var_ex(var, value, NormalOperator::PlusEqual);
     }
 
     pub fn equals_plus_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::EqualPlus));
+        self.set_var_ex(var, value, NormalOperator::EqualPlus);
     }
 
     pub fn equals_dot_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::EqualDot));
+        self.set_var_ex(var, value, NormalOperator::EqualDot);
     }
 
     pub fn dot_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::DotEqual));
+        self.set_var_ex(var, value, NormalOperator::DotEqual);
     }
 
     pub fn weak_default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::WeakDefault));
+        self.set_var_ex(var, value, NormalOperator::WeakDefault);
     }
 
     pub fn default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, Some(StmtKind::Default));
+        self.set_var_ex(var, value, NormalOperator::Default);
     }
 
     fn set_var_ex<T: Into<String>, S: Into<String>>(
         &mut self,
         var: T,
         value: S,
-        mut stmt_kind: Option<StmtKind>,
+        normal_operator: NormalOperator,
     ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
-        let mut value = value.into();
 
         //dbg!(&var);
 
@@ -359,88 +249,13 @@ impl DataSmart {
         let base = var_parts.map_or(var.as_str(), |parts| parts.0);
         let override_str = var_parts.map(|parts| parts.1);
 
-        let mut overrides_data = None;
-        if let Some(override_str) = override_str {
-            let mut locs = KEYWORD_REGEX.capture_locations();
-
-            // Check for override-style operators (append, prepend, and remove)
-            if KEYWORD_REGEX
-                .captures_read(&mut locs, override_str)
-                .is_some()
-            {
-                let keyword_pos = locs.get(1).unwrap();
-                let override_style_kind = match &override_str[keyword_pos.0..keyword_pos.1] {
-                    "append" => StmtKind::Append,
-                    "prepend" => StmtKind::Prepend,
-                    "remove" => StmtKind::Remove,
-                    _ => unreachable!(),
-                };
-
-                // TODO: BitBake gives a warning when mixing these operators
-                match stmt_kind.as_ref() {
-                    Some(StmtKind::WeakDefault) => {
-                        // In BitBake, remove, append, prepend are implemented as varflags. However, ??=
-                        // is implemented with the _defaultval varflag. So using ??= causes assignment
-                        // to the '_defaultval' varflag of the var name, e.g. TEST:remove. This is not
-                        // observable, since you can't do `getVar("TEST:remove")`. So just ignore.
-                        return None;
-                    }
-                    Some(StmtKind::PlusEqual) if override_style_kind != StmtKind::Remove => {
-                        // 'remove' is whitespace delimited, so don't bother adding space.
-                        value = format!(" {value}");
-                    }
-                    Some(StmtKind::EqualPlus) if override_style_kind != StmtKind::Remove => {
-                        // 'remove' is whitespace delimited, so don't bother adding space.
-                        value = format!("{value} ");
-                    }
-                    // TODO: set_var_ex should take a different enum that is a subset of StmtKind,
-                    //  without append, prepend, remove.
-                    Some(StmtKind::Append) => unreachable!(),
-                    Some(StmtKind::Prepend) => unreachable!(),
-                    Some(StmtKind::Remove) => unreachable!(),
-                    _ => { /* everything else is handled no differently */ }
-                }
-
-                stmt_kind = Some(override_style_kind);
-
-                // Overrides before the keyword - unconditionally applied, depending on the
-                // start value that is selected
-                let override_scope = split_overrides(&override_str[0..keyword_pos.0]);
-                debug_assert!(
-                    !override_scope
-                        .iter()
-                        .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
-                );
-
-                // Overrides after the keyword - conditionally applied
-                let override_filter = split_overrides(&override_str[keyword_pos.1..]);
-                debug_assert!(
-                    !override_filter
-                        .iter()
-                        .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
-                );
-
-                overrides_data = Some(StatementOverrides::Operation {
-                    scope: override_scope,
-                    filter: IndexSet::from_iter(override_filter),
-                });
-            } else {
-                let overrides = split_overrides(override_str);
-                overrides_data = Some(StatementOverrides::PureOverride { scope: overrides });
-            }
-        }
-
-        let stmt_kind = stmt_kind.unwrap_or(StmtKind::Assign);
+        let stmt_node = build_statement(normal_operator, override_str, value.into())?;
+        let operator_kind = stmt_node.operator;
 
         // TODO: if parsing, and no keyword given, then wipe away removes, prepends, and appends
         //  Also need to do something with overrides - not sure what though (set setVar())
 
-        let stmt_idx = self.ds.add_node(GraphItem::StmtNode(StmtNode {
-            override_str: override_str.map(String::from),
-            overrides_data,
-            kind: stmt_kind,
-            rhs: value,
-        }));
+        let stmt_idx = self.ds.add_node(GraphItem::StmtNode(stmt_node));
 
         // Lookup variable base (stem) and create if it doesn't exist
         let var_entry = self
@@ -451,7 +266,7 @@ impl DataSmart {
         let var_data = self.ds.node_weight_mut(*var_entry).unwrap().variable_mut();
 
         var_data.operations.push(VariableOperation {
-            op_type: stmt_kind,
+            op_type: operator_kind,
             idx: stmt_idx,
         });
 
@@ -482,7 +297,7 @@ impl DataSmart {
             );
         }
 
-        self.set_var_ex(var, value, None)
+        self.set_var_ex(var, value, NormalOperator::Assign)
     }
 
     pub fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
@@ -658,12 +473,12 @@ impl DataSmart {
         let old = old.as_ref();
         let new = new.as_ref();
 
-        let old_base_var = old.split_once(':').map_or(old, |p| p.0);
-        let new_base_var = new.split_once(':').map_or(new, |p| p.0);
-
         if old == new {
             bail!("Calling renameVar with equivalent keys {old} is invalid");
         }
+
+        let old_base_var = old.split_once(':').map_or(old, |p| p.0);
+        let new_base_var = new.split_once(':').map_or(new, |p| p.0);
 
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
@@ -677,25 +492,29 @@ impl DataSmart {
         //dbg!(&self.vars);
         let old_var_index = *self.vars.get(old_base_var).unwrap();
 
-        if new_var_index != old_var_index {
-            let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
+        // TODO: optimize for same index
 
-            for op in old_var_node.operations.clone().into_iter() {
-                match op.op_type {
-                    StmtKind::Append | StmtKind::Prepend | StmtKind::Remove => {
-                        self.ds.add_edge(new_var_index, op.idx, ());
-                        self.ds
-                            .node_weight_mut(new_var_index)
-                            .unwrap()
-                            .variable_mut()
-                            .operations
-                            .push(op);
-                        //(op);
-                    }
-                    _ => continue,
-                }
+
+
+        tracing::info!("{:?} {:?}", new_var_index, old_var_index);
+
+        let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
+
+        for op in old_var_node.operations.clone().into_iter() {
+            if op.op_type.is_override_operator() {
+                self.ds.add_edge(new_var_index, op.idx, ());
+                self.ds
+                    .node_weight_mut(new_var_index)
+                    .unwrap()
+                    .variable_mut()
+                    .operations
+                    .push(op);
+                //(op);
+            } else {
+                continue;
             }
         }
+
 
         //dbg!(&self.ds);
 
@@ -906,8 +725,11 @@ impl DataSmart {
             true => override_state.clone(),
         };
 
+        //dbg!(&var);
+        //dbg!(&self);
+
         // Calculate override scores for operations
-        let mut resolved_variable_operations: FifoHeap<ResolvedVariableOperation> = var_data
+        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = var_data
             .operations
             .iter()
             .filter_map(|op| {
@@ -931,64 +753,37 @@ impl DataSmart {
                         .as_ref()
                         .is_some_and(|e| split_overrides(e).starts_with(var_suffix.as_slice()))
                 {
+                    //dbg!(op);
                     return None;
                 }
 
-                let resolved_stmt_kind = {
-                    match statement.overrides_data.as_ref() {
-                        Some(o @ StatementOverrides::Operation { scope, filter }) => {
-                            if !o.is_active(&override_selection_context, &override_state) {
-                                return None;
-                            }
+                // If in parsing mode, filter out override operators
+                if parsing && statement.operator.is_override_operator() {
+                    //dbg!(op);
+                    return None;
+                }
 
-                            let score = o.score(&override_selection_context);
-                            ResolvedStatementKind::Operation {
-                                scope: scope.clone(),
-                                filter: filter.clone(),
-                                score: score.unwrap(),
-                            }
-                        }
-                        Some(o @ StatementOverrides::PureOverride { scope: overrides }) => {
-                            if !o.is_active(&override_selection_context, &override_state) {
-                                return None;
-                            }
+                if !statement
+                    .kind
+                    .is_active(&override_selection_context, &override_state)
+                {
+                    //dbg!(op);
+                    return None;
+                }
 
-                            let score = o.score(&override_selection_context);
-                            ResolvedStatementKind::PureOverride {
-                                scope: overrides.clone(),
-                                score: score.unwrap(),
-                            }
-                        }
-                        None => ResolvedStatementKind::Unconditional,
-                    }
-                };
+                //dbg!(op, &override_state);
 
-                let ret = ResolvedVariableOperation {
+                // TODO: this re-checks is active basically.
+                let score = statement.kind.score(&override_selection_context)?;
+                //dbg!(op);
+                let ret = ScoredOperation {
                     stmt_index: op.idx,
-                    kind: resolved_stmt_kind,
+                    score,
                     stmt: statement,
                 };
 
                 Some(ret)
                 // TODO: place expanded LHS in the assignment cache?
-            })
-            .inspect(|o| {
-                //dbg!(o);
-            })
-            .filter(|o| {
-                let ret = !matches!(
-                    (parsing, o.stmt.kind),
-                    (
-                        true,
-                        StmtKind::Append | StmtKind::Prepend | StmtKind::Remove
-                    )
-                );
-
-                if !ret {
-                    tracing::info!("in parsing mode, so dumping");
-                }
-
-                ret
             })
             // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
@@ -997,15 +792,9 @@ impl DataSmart {
             });
 
         // eprintln!("SCORING: ");
-        // for item in resolved_variable_operations.heap.iter() {
-        //     eprintln!(
-        //         "{}={} => {:?}",
-        //         item.0.unexpanded_override,
-        //         item.0.value,
-        //         item.0.override_score()
-        //     );
+        // for item in resolved_variable_operations.iter() {
+        //     dbg!(item);
         // }
-        //
         // eprintln!("=====");
 
         let resolved_start_value = resolved_variable_operations.first().cloned()?;
@@ -1043,13 +832,20 @@ impl DataSmart {
             }
         }
 
-        let mut ret = match resolved_start_value.stmt.kind {
-            StmtKind::WeakDefault => RetValue::WeakDefault(resolved_start_value.stmt.rhs.clone()),
-            _ => RetValue::Eager(match resolved_start_value.stmt.kind {
-                StmtKind::PlusEqual => format!(" {}", resolved_start_value.stmt.rhs),
-                StmtKind::EqualPlus => format!("{} ", resolved_start_value.stmt.rhs),
-                _ => resolved_start_value.stmt.rhs.clone(),
-            }),
+        let mut ret = match resolved_start_value.stmt.operator {
+            Operator::Normal(normal_operator) => match normal_operator {
+                NormalOperator::WeakDefault => {
+                    RetValue::WeakDefault(resolved_start_value.stmt.rhs.clone())
+                }
+                NormalOperator::PlusEqual => {
+                    RetValue::Eager(format!(" {}", resolved_start_value.stmt.rhs))
+                }
+                NormalOperator::EqualPlus => {
+                    RetValue::Eager(format!("{} ", resolved_start_value.stmt.rhs))
+                }
+                _ => RetValue::Eager(resolved_start_value.stmt.rhs.clone()),
+            },
+            _ => RetValue::Eager(resolved_start_value.stmt.rhs.clone()),
         };
 
         // eprintln!(
@@ -1065,61 +861,65 @@ impl DataSmart {
             op.stmt_index != resolved_start_value.stmt_index
                 // Handle override scoring + LHS
                 // TODO: clarify
-                && (op.kind.override_score() >= resolved_start_value.kind.override_score()
-                    || (op.kind.is_override_operation()
-                        && (op.kind.override_scope() == resolved_start_value.kind.override_scope()
-                            || op.kind.override_scope().is_empty())))
+                && (op.score >= resolved_start_value.score
+                    || (op.stmt.operator.is_override_operator()
+                        && (op.stmt.kind.override_scope() == resolved_start_value.stmt.kind.override_scope()
+                            || op.stmt.kind.override_scope().is_empty())))
         });
 
         for op in resolved_variable_operations {
-            match op.stmt.kind {
-                // Weak default is handled the same as assign - priority selection happened above
-                StmtKind::Assign => {
-                    ret = RetValue::Eager(op.stmt.rhs.clone());
-                }
-                StmtKind::WeakDefault => {
-                    if !matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::WeakDefault(op.stmt.rhs.clone());
+            // Weak default is handled the same as assign - priority selection happened above
+            match op.stmt.operator {
+                Operator::Normal(normal_operator) => match normal_operator {
+                    NormalOperator::Assign => {
+                        ret = RetValue::Eager(op.stmt.rhs.clone());
                     }
-                }
-                StmtKind::Remove if !parsing => {
-                    // TODO: aggregate all removes and do it in one shot?
-                    let mut removes: HashSet<String> = HashSet::new();
-                    removes.insert(op.stmt.rhs.clone());
-                    let new_ret = self.apply_removes(ret.as_ref(), &removes);
-                    ret = RetValue::Eager(new_ret);
-                }
-                StmtKind::Append if !parsing => {
-                    ret = RetValue::Eager(ret.to_string() + &op.stmt.rhs);
-                }
-                StmtKind::DotEqual => {
-                    if matches!(ret, RetValue::Eager(_)) {
+                    NormalOperator::WeakDefault => {
+                        if !matches!(ret, RetValue::Eager(_)) {
+                            ret = RetValue::WeakDefault(op.stmt.rhs.clone());
+                        }
+                    }
+                    NormalOperator::DotEqual => {
+                        if matches!(ret, RetValue::Eager(_)) {
+                            ret = RetValue::Eager(ret.to_string() + &op.stmt.rhs);
+                        }
+                    }
+                    NormalOperator::EqualDot => {
+                        if matches!(ret, RetValue::Eager(_)) {
+                            ret = RetValue::Eager(format!("{}{}", op.stmt.rhs, ret.as_ref()));
+                        }
+                    }
+                    NormalOperator::PlusEqual => {
+                        if matches!(ret, RetValue::Eager(_)) {
+                            ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.stmt.rhs));
+                        }
+                    }
+                    NormalOperator::EqualPlus => {
+                        if matches!(ret, RetValue::Eager(_)) {
+                            ret = RetValue::Eager(format!("{} {}", op.stmt.rhs, ret.as_ref()));
+                        }
+                    }
+                    NormalOperator::Default => {
+                        if matches!(ret, RetValue::WeakDefault(_)) {
+                            ret = RetValue::Default(op.stmt.rhs.clone())
+                        }
+                    }
+                },
+                Operator::Override(override_operator) if !parsing => match override_operator {
+                    OverrideOperator::Remove => {
+                        // TODO: aggregate all removes and do it in one shot?
+                        let mut removes: HashSet<String> = HashSet::new();
+                        removes.insert(op.stmt.rhs.clone());
+                        let new_ret = self.apply_removes(ret.as_ref(), &removes);
+                        ret = RetValue::Eager(new_ret);
+                    }
+                    OverrideOperator::Append => {
                         ret = RetValue::Eager(ret.to_string() + &op.stmt.rhs);
                     }
-                }
-                StmtKind::Prepend if !parsing => {
-                    ret = RetValue::Eager(format!("{}{}", op.stmt.rhs, ret.as_ref()));
-                }
-                StmtKind::EqualDot => {
-                    if matches!(ret, RetValue::Eager(_)) {
+                    OverrideOperator::Prepend => {
                         ret = RetValue::Eager(format!("{}{}", op.stmt.rhs, ret.as_ref()));
                     }
-                }
-                StmtKind::PlusEqual => {
-                    if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(format!("{} {}", ret.as_ref(), op.stmt.rhs));
-                    }
-                }
-                StmtKind::EqualPlus => {
-                    if matches!(ret, RetValue::Eager(_)) {
-                        ret = RetValue::Eager(format!("{} {}", op.stmt.rhs, ret.as_ref()));
-                    }
-                }
-                StmtKind::Default => {
-                    if matches!(ret, RetValue::WeakDefault(_)) {
-                        ret = RetValue::Default(op.stmt.rhs.clone())
-                    }
-                }
+                },
                 _ => {
                     // ignore
                 }
@@ -1145,16 +945,16 @@ impl DataSmart {
             for stmt in var_node.operations.iter() {
                 let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
 
-                match stmt_node.overrides_data.as_ref() {
-                    None => continue,
-                    Some(o) => {
-                        dbg!(&stmt_node);
-                        match o {
-                            StatementOverrides::Operation { scope, filter } => {}
-                            StatementOverrides::PureOverride { .. } => {}
-                        }
-                    }
-                }
+                // match stmt_node.overrides_data.as_ref() {
+                //     None => continue,
+                //     Some(o) => {
+                //         dbg!(&stmt_node);
+                //         match o {
+                //             StatementOverrides::Operation { scope, filter, .. } => {}
+                //             StatementOverrides::PureOverride { .. } => {}
+                //         }
+                //     }
+                // }
             }
         }
 
@@ -1163,5 +963,96 @@ impl DataSmart {
 
     pub fn keys(&self) -> KeysIter {
         KeysIter {}
+    }
+}
+
+fn build_statement(
+    normal_operator: NormalOperator,
+    override_str: Option<&str>,
+    mut value: String,
+) -> Option<StmtNode> {
+    match override_str {
+        None => Some(StmtNode {
+            override_str: None,
+            operator: normal_operator.into(),
+            kind: StatementKind::Unconditional,
+            rhs: value,
+        }),
+        Some(override_str) => {
+            let mut locs = KEYWORD_REGEX.capture_locations();
+
+            // Check for override-style operators (append, prepend, and remove)
+            if KEYWORD_REGEX
+                .captures_read(&mut locs, override_str)
+                .is_none()
+            {
+                return Some(StmtNode {
+                    override_str: Some(override_str.to_string()),
+                    operator: normal_operator.into(),
+                    kind: StatementKind::PureOverride {
+                        scope: split_overrides(override_str),
+                    },
+                    rhs: value,
+                });
+            }
+
+            let keyword_pos = locs.get(1).unwrap();
+            let override_operator = match &override_str[keyword_pos.0..keyword_pos.1] {
+                "append" => OverrideOperator::Append,
+                "prepend" => OverrideOperator::Prepend,
+                "remove" => OverrideOperator::Remove,
+                _ => unreachable!(),
+            };
+
+            let operator_kind = Operator::from(override_operator);
+
+            // TODO: BitBake gives a warning when mixing these operators
+            match normal_operator {
+                NormalOperator::WeakDefault => {
+                    // In BitBake, remove, append, prepend are implemented as varflags. However, ??=
+                    // is implemented with the _defaultval varflag. So using ??= causes assignment
+                    // to the '_defaultval' varflag of the var name, e.g. TEST:remove. This is not
+                    // observable, since you can't do `getVar("TEST:remove")`. So just ignore.
+                    return None;
+                }
+                NormalOperator::PlusEqual if override_operator != OverrideOperator::Remove => {
+                    // 'remove' is whitespace delimited, so don't bother adding space.
+                    value = format!(" {value}");
+                }
+                NormalOperator::EqualPlus if override_operator != OverrideOperator::Remove => {
+                    // 'remove' is whitespace delimited, so don't bother adding space.
+                    value = format!("{value} ");
+                }
+                _ => { /* everything else is handled no differently */ }
+            }
+
+            // Overrides before the keyword - unconditionally applied, depending on the
+            // start value that is selected
+            let override_scope = split_overrides(&override_str[0..keyword_pos.0]);
+            debug_assert!(
+                !override_scope
+                    .iter()
+                    .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+            );
+
+            // Overrides after the keyword - conditionally applied
+            let override_filter = split_overrides(&override_str[keyword_pos.1..]);
+            debug_assert!(
+                !override_filter
+                    .iter()
+                    .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+            );
+
+            Some(StmtNode {
+                override_str: Some(override_str.to_string()),
+                operator: operator_kind,
+                kind: StatementKind::Operation {
+                    scope: override_scope,
+                    filter: IndexSet::from_iter(override_filter),
+                    override_operator,
+                },
+                rhs: value,
+            })
+        }
     }
 }
