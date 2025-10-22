@@ -167,6 +167,8 @@ impl Default for DataSmart {
     }
 }
 
+static OVERRIDE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w+$").unwrap());
+
 impl DataSmart {
     pub fn new() -> DataSmart {
         DataSmart {
@@ -485,7 +487,7 @@ impl DataSmart {
 
         let old_base_var = old.split_once(':').map_or(old, |p| p.0);
         let new_base_var = new.split_once(':').map_or(new, |p| p.0);
-        tracing::info!("{:?} {:?}", old_base_var, new_base_var);
+        tracing::info!("{:?} {:?}", old, new);
 
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
@@ -494,7 +496,11 @@ impl DataSmart {
         }
 
         // Next, transplant :appends, :prepends, and :removes
-        let new_var_index = *self.vars.get(new_base_var).unwrap();
+        let new_var_index = *self
+            .vars
+            .entry(new_base_var.to_string())
+            .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(new_base_var)));
+
         let old_var_index = *self.vars.get(old_base_var).unwrap();
 
         let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
@@ -511,16 +517,13 @@ impl DataSmart {
         //   =>
 
         for op in old_var_node.operations.clone().into_iter() {
+            let op_data = self.ds.node_weight_mut(op.idx).unwrap();
             if op.op_type.is_override_operator() {
-                tracing::warn!("add_edge: {op:?}");
-
-                let op_data = self.ds.node_weight_mut(op.idx).unwrap();
-
                 op_data.statement_mut().override_str = Some("a".to_string());
                 match &mut op_data.statement_mut().kind {
                     StatementKind::Operation { scope, .. } => {
                         scope.clear();
-                        scope.push("a".to_string());
+                        //scope.push("a".to_string());
                     }
                     StatementKind::PureOverride { .. } => {}
                     StatementKind::Unconditional => {}
@@ -535,7 +538,7 @@ impl DataSmart {
                     .push(op);
                 //(op);
             } else {
-                continue;
+                dbg!(&op_data);
             }
         }
 
@@ -612,25 +615,17 @@ impl DataSmart {
                 var_parts.extend(split_overrides(&b));
             }
 
-            while !var_parts.is_empty() {
-                let last = var_parts.last().unwrap().as_str();
-                if !matches!(last, "append" | "prepend" | "remove") {
-                    let new_var = var_parts.join(":");
-                    if new_var.contains("${") {
-                        let expanded = self.expand(&new_var)?;
-                        operations.insert(new_var, expanded);
-                    } else {
-                        break;
-                    }
-                }
+            dbg!(&nodes.1.statement());
+            eprintln!("{:?}", &var_parts);
 
-                var_parts.pop();
-            }
+            let new_var = var_parts.join(":");
+            let expanded = self.expand(&new_var)?;
+            operations.insert(new_var, expanded);
         }
 
         tracing::info!("operations: {:?}", &operations);
 
-        let ret = operations.keys().cloned().collect_vec();
+        let ret = operations.keys().cloned().sorted().collect_vec();
         for o in operations.into_iter() {
             self.rename_var(o.0, o.1)?;
         }
@@ -956,17 +951,63 @@ impl DataSmart {
         Some(ret.to_string())
     }
 
+    // TODO: this should return in insertion order, like BitBake?
     pub fn get_all_keys(&self) -> Vec<String> {
         let mut ret = HashSet::new();
 
-        for var in &self.vars {
-            // Add base variable
-            ret.insert(var.0.clone());
+        self.compute_overrides().unwrap();
 
+        let override_state = RefCell::borrow(&self.active_overrides);
+        let override_state = match override_state.as_ref() {
+            Some(state) => Cow::Borrowed(state),
+            None => Cow::Owned(IndexSet::new()),
+        };
+
+        for var in &self.vars {
             // Iterate over statements
             let var_node = self.ds.node_weight(*var.1).unwrap().variable();
             for stmt in var_node.operations.iter() {
-                let _stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
+                let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
+                dbg!(stmt_node);
+
+                // TODO: check if edge between var and statement is already recorded in 'unexpanded' map to save time?
+
+                match &stmt_node.kind {
+                    // e.g. A:b:append:c
+                    StatementKind::Operation { scope, filter, .. } => {
+                        // Yield the override variant (for "A:b:append:c" that is "A:b"), unless ${} ... TODO
+                        let mut parts = vec![var.0.clone()];
+                        parts.extend(scope.into_iter().cloned());
+                        ret.insert(parts.join(":"));
+
+                        // TODO: decompose
+                        // TODO: handle unexpanded filter
+                    }
+
+                    // e.g. A:b:c
+                    StatementKind::PureOverride { scope } => {
+                        debug_assert!(!scope.is_empty());
+
+                        let mut parts = vec![var.0.clone()];
+                        parts.extend(scope.into_iter().cloned());
+                        ret.insert(parts.join(":"));
+
+                        // Lop off parts of the scope until we find one that isn't active
+                        while let Some(last) = parts.last() && override_state.contains(last) && OVERRIDE_REGEX.is_match(last) {
+                            parts.pop();
+                            ret.insert(parts.join(":"));
+                        }
+                    }
+                    // e.g. A
+                    StatementKind::Unconditional => {
+                        ret.insert(var.0.clone());
+                    }
+                }
+
+                if stmt_node
+                    .kind
+                    .is_active(&Cow::Owned(IndexSet::default()), &override_state)
+                {}
 
                 // match stmt_node.overrides_data.as_ref() {
                 //     None => continue,
@@ -981,11 +1022,11 @@ impl DataSmart {
             }
         }
 
-        ret.into_iter().collect_vec()
+        ret.into_iter().sorted().collect_vec()
     }
 
     pub fn keys(&self) -> KeysIter {
-        KeysIter {}
+        todo!();
     }
 }
 

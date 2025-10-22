@@ -129,8 +129,10 @@ P = "T:append"
 TES${P} = "Q"
         "#,
     );
+    // TODO expected keys: ['P', 'TEST', 'TES${P}', 'TES${Q}', 'Q']
 
     let todolist = d.expand_keys().unwrap();
+    // TODO expected keys: ['Q', 'P', 'TEST']
 
     assert_eq!(todolist, vec!["TES${P}", "TES${Q}"]);
 
@@ -140,4 +142,54 @@ TES${P} = "Q"
     //
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "baseQab");
+}
+
+#[test]
+fn expand_keys_8() {
+    let mut d = eval(
+        r#"
+TEST = "base"
+TES${Q}:append = "a"
+TES${Q}:append = "b"
+TES${Q}:append:${Q} = "b"
+Q = "T"
+P = "T:append"
+TES${P} = "Q"
+        "#,
+    );
+    // TODO expected keys: ['TEST', 'TES${P}', 'P', 'TES${Q}', 'Q', 'TES${Q}:append:${Q}']
+
+    let todolist = d.expand_keys().unwrap();
+    // TODO expected keys: ['TEST', 'P', 'TEST:append:T', 'Q']
+
+    assert_eq!(todolist, vec!["TES${P}", "TES${Q}", "TES${Q}:append:${Q}"]);
+
+    // TODO: expand_keys should give this warning:
+    //  Variable key TES${Q} (ab) replaces original key TEST (baseQ)
+}
+
+#[test_log::test]
+fn expand_keys_9() {
+    let mut d = eval(
+        r#"
+        TEST:a:${C}b:c = "1"
+        TEST:a:${C}:b = "2"
+        TEST:a = "3"
+        C = "p"
+"#,
+    );
+
+    // TODO expected keys: ['TEST:a:${C}b:c', 'TEST:a', 'C', 'TEST:a:${C}:b']
+    let todolist = d.expand_keys().unwrap();
+    // TODO expected keys: ['TEST:a:p:b', 'TEST:a', 'C', 'TEST:a:pb:c']
+
+    assert_eq!(todolist, vec!["TEST:a:${C}:b", "TEST:a:${C}b:c"]);
+
+    assert_eq!(get_var!(&d, "TEST:a").unwrap(), "3");
+    assert!(get_var!(&d, "TEST:a:${C}b:c").is_none());
+    assert!(get_var!(&d, "TEST:a:${C}:b").is_none());
+    assert!(get_var!(&d, "TEST").is_none());
+
+    assert_eq!(get_var!(&d, "TEST:a:p:b").unwrap(), "2");
+    assert_eq!(get_var!(&d, "TEST:a:pb:c").unwrap(), "1");
 }

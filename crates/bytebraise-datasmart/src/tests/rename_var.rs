@@ -1,7 +1,5 @@
 #[cfg(test)]
 use crate::{evaluate::eval, macros::get_var};
-use petgraph::dot::Dot;
-use std::fs::File;
 
 #[test]
 fn basic_1() {
@@ -14,8 +12,84 @@ TEST = "A"
     assert_eq!(get_var!(&d, "TEST").unwrap(), "A");
 
     d.rename_var("TEST", "NEW").unwrap();
-
+    assert_eq!(get_var!(&d, "TEST"), None);
     assert_eq!(get_var!(&d, "NEW").unwrap(), "A");
+}
+
+#[test_log::test]
+fn basic_2() {
+    let mut d = eval(
+        r#"
+TEST:a:b:c = "1"
+TEST:a:b = "2"
+TEST:a = "3"
+    "#,
+    );
+
+    d.rename_var("TEST:a:b", "WAT").unwrap();
+
+    assert_eq!(get_var!(&d, "WAT").unwrap(), "2");
+    assert_eq!(get_var!(&d, "TEST:a:b:c").unwrap(), "1");
+    assert_eq!(get_var!(&d, "TEST:a:b"), None);
+    assert_eq!(get_var!(&d, "TEST:a").unwrap(), "3");
+    assert_eq!(get_var!(&d, "TEST"), None);
+}
+
+#[test_log::test]
+fn basic_3() {
+    let mut d = eval(
+        r#"
+TEST:a:b:c = "1"
+TEST:a:b = "2"
+TEST:a = "3"
+    "#,
+    );
+
+    eprintln!();
+    d.rename_var("TEST", "WAT").unwrap();
+    eprintln!();
+    d.dump();
+
+    assert!(get_var!(&d, "TEST").is_none());
+    assert!(get_var!(&d, "TEST:a:b:c").is_none());
+    assert!(get_var!(&d, "TEST:a:b").is_none());
+    assert!(get_var!(&d, "TEST:a").is_none());
+    assert!(get_var!(&d, "WAT").is_none());
+
+    assert_eq!(get_var!(&d, "WAT:a:b:c").unwrap(), "1");
+    assert_eq!(get_var!(&d, "WAT:a:b").unwrap(), "2");
+    assert_eq!(get_var!(&d, "WAT:a").unwrap(), "3");
+}
+
+#[test_log::test]
+fn basic_4() {
+    let mut d = eval(
+        r#"
+TEST:a:b:c = "1"
+TEST:a:b = "2"
+TEST:a = "3"
+    "#,
+    );
+    // TODO: expected keys: ['TEST:a:b:c', 'TEST:a', 'TEST:a:b']
+
+    d.rename_var("TEST:a", "WAT:t").unwrap();
+    // TODO: expected keys: ['TEST:a:b:c', 'WAT:t', 'TEST:a:b']
+
+    assert_eq!(get_var!(&d, "WAT:t").unwrap(), "3");
+}
+
+#[test_log::test]
+fn basic_5() {
+    let mut d = eval(
+        r#"
+TES${TT} = "WAT"
+TT = "T"
+    "#,
+    );
+
+    d.expand_keys().unwrap();
+
+    assert_eq!(get_var!(&d, "TEST").unwrap(), "WAT");
 }
 
 #[test]
@@ -185,7 +259,6 @@ OVERRIDES = "a"
     d.expand_keys().unwrap();
 
     d.dump();
-    dbg!(&d);
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
 }
@@ -205,4 +278,22 @@ OVERRIDES = "a"
     dbg!(&d);
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
+}
+
+#[test_log::test]
+fn rename_3() {
+    let mut d = eval(
+        r#"
+TEST:${A}:append = "2"
+A = "q"
+TEST:${A}:q:a:q = "P"
+OVERRIDES = "a"
+    "#,
+    );
+
+    d.expand_keys().unwrap();
+    d.dump();
+
+    assert_eq!(get_var!(&d, "TEST:q").unwrap(), "P");
+    panic!();
 }
