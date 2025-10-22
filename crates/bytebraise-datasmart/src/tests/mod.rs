@@ -810,7 +810,7 @@ B = ":append"
     //     assert!(get_var!(&d, "P:append").is_none());
     // }
 
-    #[test]
+    #[test_log::test]
     fn test_wat() {
         let mut d = DataSmart::new();
         d.set_var("P", "");

@@ -1,5 +1,7 @@
 #[cfg(test)]
 use crate::{evaluate::eval, macros::get_var};
+use petgraph::dot::Dot;
+use std::fs::File;
 
 #[test]
 fn basic_1() {
@@ -182,6 +184,7 @@ OVERRIDES = "a"
 
     d.expand_keys().unwrap();
 
+    d.dump();
     dbg!(&d);
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "2");

@@ -37,6 +37,7 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
 use petgraph::data::DataMap;
+use petgraph::dot::{Config, Dot};
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::{DefaultIx, EdgeIndex};
@@ -46,6 +47,8 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
+use std::fs::File;
+use std::io::Write;
 use std::ops::Deref;
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
@@ -73,7 +76,7 @@ impl ExpansionState {
 
 #[derive(Debug)]
 pub struct DataSmart {
-    ds: StableGraph<GraphItem, ()>,
+    ds: StableGraph<GraphItem, u8>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     unexpanded_operations: HashSet<EdgeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
@@ -92,7 +95,7 @@ pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
 // aabb => ([0, 2, 2], 3, 1)
 // abab => ([0, 2, 2], 3, 1)
 // baba => ([0, 2, 2], 2, 2)
-#[tracing::instrument(ret)]
+//#[tracing::instrument(ret)]
 pub(crate) fn score_override(
     active_overrides: &Cow<IndexSet<String>>,
     candidate_overrides: &Vec<String>,
@@ -174,6 +177,12 @@ impl DataSmart {
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
         }
+    }
+
+    pub fn dump(&self) {
+        let mut f = File::create("/tmp/example1.dot").unwrap();
+        let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeNoLabel]));
+        f.write_all(&output.as_bytes()).unwrap();
     }
 
     fn apply_removes(&self, input: &str, removes: &HashSet<String>) -> String {
@@ -266,7 +275,7 @@ impl DataSmart {
             idx: stmt_idx,
         });
 
-        let e = self.ds.add_edge(*var_entry, stmt_idx, ());
+        let e = self.ds.add_edge(*var_entry, stmt_idx, 0);
 
         // If any part of the key contains '${' (not just the base), then track it as unexpanded.
         // Use [`DataSmart::expand_vars`] to expand it later.
@@ -296,7 +305,8 @@ impl DataSmart {
         self.set_var_ex(var, value, NormalOperator::Assign)
     }
 
-    pub fn expand<S: AsRef<str>>(&self, value: S) -> DataSmartResult<String> {
+    #[tracing::instrument(skip(self), ret)]
+    pub fn expand<S: AsRef<str> + Debug>(&self, value: S) -> DataSmartResult<String> {
         let value = value.as_ref();
 
         // |expand_state| is used to track which variables are accessed during an expansion, across
@@ -475,6 +485,7 @@ impl DataSmart {
 
         let old_base_var = old.split_once(':').map_or(old, |p| p.0);
         let new_base_var = new.split_once(':').map_or(new, |p| p.0);
+        tracing::info!("{:?} {:?}", old_base_var, new_base_var);
 
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
@@ -484,19 +495,38 @@ impl DataSmart {
 
         // Next, transplant :appends, :prepends, and :removes
         let new_var_index = *self.vars.get(new_base_var).unwrap();
-        //dbg!(&old_base_var);
-        //dbg!(&self.vars);
         let old_var_index = *self.vars.get(old_base_var).unwrap();
-
-        // TODO: optimize for same index
-
-        tracing::info!("{:?} {:?}", new_var_index, old_var_index);
 
         let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
 
+        // Worked example:
+        //
+        // TEST = "b"
+        // TEST:${A}:append = "2"
+        // A = "a"
+        // OVERRIDES = "a"
+        //
+        // d.expand_keys();
+        //   => rename_var("TEST:${A}", "TEST:a");
+        //   =>
+
         for op in old_var_node.operations.clone().into_iter() {
             if op.op_type.is_override_operator() {
-                self.ds.add_edge(new_var_index, op.idx, ());
+                tracing::warn!("add_edge: {op:?}");
+
+                let op_data = self.ds.node_weight_mut(op.idx).unwrap();
+
+                op_data.statement_mut().override_str = Some("a".to_string());
+                match &mut op_data.statement_mut().kind {
+                    StatementKind::Operation { scope, .. } => {
+                        scope.clear();
+                        scope.push("a".to_string());
+                    }
+                    StatementKind::PureOverride { .. } => {}
+                    StatementKind::Unconditional => {}
+                }
+
+                self.ds.add_edge(new_var_index, op.idx, 1);
                 self.ds
                     .node_weight_mut(new_var_index)
                     .unwrap()
@@ -598,7 +628,7 @@ impl DataSmart {
             }
         }
 
-        tracing::info!("{:?}", &operations);
+        tracing::info!("operations: {:?}", &operations);
 
         let ret = operations.keys().cloned().collect_vec();
         for o in operations.into_iter() {
@@ -609,9 +639,10 @@ impl DataSmart {
         // TODO: will only be expanded if the referenced variables actually exist
         for stmt in self.ds.node_weights() {
             if let GraphItem::StmtNode(stmt) = stmt
-                && let Some(o) = stmt.override_str.as_ref() {
-                    assert!(!o.contains("${"));
-                }
+                && let Some(o) = stmt.override_str.as_ref()
+            {
+                assert!(!o.contains("${"));
+            }
         }
 
         Ok(ret)

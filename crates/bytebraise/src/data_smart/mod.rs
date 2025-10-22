@@ -505,10 +505,11 @@ impl DataSmartInner {
                     the_match.as_str(),
                     "_content",
                     GetVarOptions::default().expand(false),
-                )? {
-                    value = Some(value_inner);
-                    removes = subparser.removes.unwrap_or_default();
-                }
+                )?
+            {
+                value = Some(value_inner);
+                removes = subparser.removes.unwrap_or_default();
+            }
         }
 
         let var_flags = self.find_var(key);
@@ -597,65 +598,69 @@ impl DataSmartInner {
 
         if let (Some(_value), Some(var_flags)) = (&value, &var_flags) {
             // Grab any _remove flags
-            if (flag == CONTENT_FLAG) && !options.parsing
-                && let Some(removes2) = var_flags.get(REMOVE_FLAG) {
-                    self.need_overrides()?;
+            if (flag == CONTENT_FLAG)
+                && !options.parsing
+                && let Some(removes2) = var_flags.get(REMOVE_FLAG)
+            {
+                self.need_overrides()?;
 
-                    let data: &Vec<VariableContents> = removes2.try_into().unwrap();
-                    for v in data {
-                        let v: &(Box<VariableContents>, Box<VariableContents>) =
-                            v.try_into().unwrap();
-                        let r = v.0.as_ref().as_string();
-                        let o: &Option<Box<VariableContents>> = v.1.as_ref().try_into().unwrap();
+                let data: &Vec<VariableContents> = removes2.try_into().unwrap();
+                for v in data {
+                    let v: &(Box<VariableContents>, Box<VariableContents>) = v.try_into().unwrap();
+                    let r = v.0.as_ref().as_string();
+                    let o: &Option<Box<VariableContents>> = v.1.as_ref().try_into().unwrap();
 
-                        let override_string = o
-                            .as_ref()
-                            .map(|v| v.as_ref().as_string())
-                            .unwrap_or_default();
-                        if RefCell::borrow(&self.override_state)
-                            .is_override_active(override_string.as_str())
-                        {
-                            removes.insert(r.clone());
-                        }
+                    let override_string = o
+                        .as_ref()
+                        .map(|v| v.as_ref().as_string())
+                        .unwrap_or_default();
+                    if RefCell::borrow(&self.override_state)
+                        .is_override_active(override_string.as_str())
+                    {
+                        removes.insert(r.clone());
                     }
                 }
+            }
         }
 
         // Apply _remove flags
         if let (Some(value), Some(parser)) = (&mut value, &mut parser)
-            && !removes.is_empty() && (flag == CONTENT_FLAG) && !options.parsing {
-                let mut expanded_removes = HashMap::new();
-                for r in &removes {
-                    expanded_removes.insert(
-                        r.clone(),
-                        self.expand(r, Option::<String>::None)?
-                            .unwrap()
-                            .split_whitespace()
-                            .map(|v| v.to_string())
-                            .collect::<Vec<_>>(),
-                    );
-                }
-
-                parser.removes = Some(HashSet::new());
-                let mut val = String::new();
-                for v in split_keep(&WHITESPACE_REGEX, parser.value.as_ref().unwrap()) {
-                    let mut skip = false;
-                    for r in &removes {
-                        if expanded_removes.get(r).unwrap().contains(&v.to_string()) {
-                            parser.removes.as_mut().unwrap().insert(r.clone());
-                            skip = true;
-                        }
-                    }
-                    if skip {
-                        continue;
-                    }
-                    val += v;
-                }
-                parser.value = Some(val.clone());
-                if options.expand {
-                    *value = VariableContents::String(val);
-                }
+            && !removes.is_empty()
+            && (flag == CONTENT_FLAG)
+            && !options.parsing
+        {
+            let mut expanded_removes = HashMap::new();
+            for r in &removes {
+                expanded_removes.insert(
+                    r.clone(),
+                    self.expand(r, Option::<String>::None)?
+                        .unwrap()
+                        .split_whitespace()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>(),
+                );
             }
+
+            parser.removes = Some(HashSet::new());
+            let mut val = String::new();
+            for v in split_keep(&WHITESPACE_REGEX, parser.value.as_ref().unwrap()) {
+                let mut skip = false;
+                for r in &removes {
+                    if expanded_removes.get(r).unwrap().contains(&v.to_string()) {
+                        parser.removes.as_mut().unwrap().insert(r.clone());
+                        skip = true;
+                    }
+                }
+                if skip {
+                    continue;
+                }
+                val += v;
+            }
+            parser.value = Some(val.clone());
+            if options.expand {
+                *value = VariableContents::String(val);
+            }
+        }
 
         // TODO cache
 
@@ -975,10 +980,11 @@ pub fn expand_keys(data: &DataSmart) -> DataSmartResult<()> {
         let expanded_key = todo_list.get(key).unwrap();
         if let Some(_new_value) =
             data.get_var_opt(expanded_key, GetVarOptions::default().expand(false))?
-            && let Some(_val) = data.get_var_opt(key, GetVarOptions::default().expand(false))? {
-                // TODO warn
-                panic!("TODO warning");
-            }
+            && let Some(_val) = data.get_var_opt(key, GetVarOptions::default().expand(false))?
+        {
+            // TODO warn
+            panic!("TODO warning");
+        }
         data.rename_var(key, expanded_key)?;
     }
 

@@ -47,9 +47,10 @@ impl PerVarOverrideData {
 
         for (shortvar, entry) in decompose_variable(var) {
             if let Some(data) = self.data.get_mut(&shortvar)
-                && let Some(needle) = data.iter().position(|x| *x == entry) {
-                    data.remove(needle);
-                }
+                && let Some(needle) = data.iter().position(|x| *x == entry)
+            {
+                data.remove(needle);
+            }
         }
     }
 
