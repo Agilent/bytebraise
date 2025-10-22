@@ -25,13 +25,12 @@ pub fn find_top_dir() -> anyhow::Result<Option<PathBuf>> {
         )));
     }
 
-    if let Some(bbpath) = bbpath {
-        if let Some(bitbakeconf) = which(bbpath, "conf/bitbake.conf", false, false)? {
+    if let Some(bbpath) = bbpath
+        && let Some(bitbakeconf) = which(bbpath, "conf/bitbake.conf", false, false)? {
             return Ok(Some(PathBuf::from(
                 bitbakeconf.parent().unwrap().parent().unwrap(),
             )));
         }
-    }
 
     Ok(None)
 }

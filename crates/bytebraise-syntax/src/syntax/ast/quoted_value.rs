@@ -89,7 +89,7 @@ impl QuotedValue {
     }
 
     /// Value text (between the quotes) with escaped newlines removed
-    pub fn value(&self) -> Cow<str> {
+    pub fn value(&self) -> Cow<'_, str> {
         // Handle escaped newlines
         self.raw_value().cow_replace("\\\n", "")
     }

@@ -500,8 +500,8 @@ impl DataSmartInner {
                 }
             }
 
-            if let Some(the_match) = the_match {
-                if let Some((value_inner, subparser)) = self.get_var_flag_with_parser(
+            if let Some(the_match) = the_match
+                && let Some((value_inner, subparser)) = self.get_var_flag_with_parser(
                     the_match.as_str(),
                     "_content",
                     GetVarOptions::default().expand(false),
@@ -509,7 +509,6 @@ impl DataSmartInner {
                     value = Some(value_inner);
                     removes = subparser.removes.unwrap_or_default();
                 }
-            }
         }
 
         let var_flags = self.find_var(key);
@@ -598,8 +597,8 @@ impl DataSmartInner {
 
         if let (Some(_value), Some(var_flags)) = (&value, &var_flags) {
             // Grab any _remove flags
-            if (flag == CONTENT_FLAG) && !options.parsing {
-                if let Some(removes2) = var_flags.get(REMOVE_FLAG) {
+            if (flag == CONTENT_FLAG) && !options.parsing
+                && let Some(removes2) = var_flags.get(REMOVE_FLAG) {
                     self.need_overrides()?;
 
                     let data: &Vec<VariableContents> = removes2.try_into().unwrap();
@@ -620,12 +619,11 @@ impl DataSmartInner {
                         }
                     }
                 }
-            }
         }
 
         // Apply _remove flags
-        if let (Some(value), Some(parser)) = (&mut value, &mut parser) {
-            if !removes.is_empty() && (flag == CONTENT_FLAG) && !options.parsing {
+        if let (Some(value), Some(parser)) = (&mut value, &mut parser)
+            && !removes.is_empty() && (flag == CONTENT_FLAG) && !options.parsing {
                 let mut expanded_removes = HashMap::new();
                 for r in &removes {
                     expanded_removes.insert(
@@ -658,7 +656,6 @@ impl DataSmartInner {
                     *value = VariableContents::String(val);
                 }
             }
-        }
 
         // TODO cache
 
@@ -807,15 +804,15 @@ impl DataSmartInner {
         Ok(())
     }
 
-    fn find_var<T: AsRef<str>>(&self, var: T) -> Option<Ref<DataSmartFlags>> {
+    fn find_var<T: AsRef<str>>(&self, var: T) -> Option<Ref<'_, DataSmartFlags>> {
         Ref::filter_map(RefCell::borrow(&self.data), |d| d.get(var.as_ref())).ok()
     }
 
-    fn find_var_mut<T: AsRef<str>>(&self, var: T) -> Option<RefMut<DataSmartFlags>> {
+    fn find_var_mut<T: AsRef<str>>(&self, var: T) -> Option<RefMut<'_, DataSmartFlags>> {
         RefMut::filter_map(RefCell::borrow_mut(&self.data), |d| d.get_mut(var.as_ref())).ok()
     }
 
-    fn find_or_create_var<T: AsRef<str>>(&self, var: T) -> RefMut<DataSmartFlags> {
+    fn find_or_create_var<T: AsRef<str>>(&self, var: T) -> RefMut<'_, DataSmartFlags> {
         RefMut::map(RefCell::borrow_mut(&self.data), |d| {
             d.entry(var.as_ref().into()).or_default()
         })
@@ -978,12 +975,10 @@ pub fn expand_keys(data: &DataSmart) -> DataSmartResult<()> {
         let expanded_key = todo_list.get(key).unwrap();
         if let Some(_new_value) =
             data.get_var_opt(expanded_key, GetVarOptions::default().expand(false))?
-        {
-            if let Some(_val) = data.get_var_opt(key, GetVarOptions::default().expand(false))? {
+            && let Some(_val) = data.get_var_opt(key, GetVarOptions::default().expand(false))? {
                 // TODO warn
                 panic!("TODO warning");
             }
-        }
         data.rename_var(key, expanded_key)?;
     }
 

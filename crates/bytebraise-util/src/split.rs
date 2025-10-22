@@ -26,7 +26,7 @@ where
     /// assert_eq!(iter.next(), Some(("VAR", "foo_bar_local")));
     /// assert_eq!(iter.next(), None);
     /// ```
-    fn rsplit_all(&self, c: char) -> RSplit {
+    fn rsplit_all(&self, c: char) -> RSplit<'_> {
         RSplit::new(self.as_ref(), c)
     }
 }

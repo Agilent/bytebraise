@@ -44,11 +44,9 @@ use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::ops::Deref;
-use tracing::{Level, event};
 
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
@@ -610,11 +608,10 @@ impl DataSmart {
         // Sanity check: did we actually expand everything?
         // TODO: will only be expanded if the referenced variables actually exist
         for stmt in self.ds.node_weights() {
-            if let GraphItem::StmtNode(stmt) = stmt {
-                if let Some(o) = stmt.override_str.as_ref() {
+            if let GraphItem::StmtNode(stmt) = stmt
+                && let Some(o) = stmt.override_str.as_ref() {
                     assert!(!o.contains("${"));
                 }
-            }
         }
 
         Ok(ret)
@@ -938,7 +935,7 @@ impl DataSmart {
             // Iterate over statements
             let var_node = self.ds.node_weight(*var.1).unwrap().variable();
             for stmt in var_node.operations.iter() {
-                let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
+                let _stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
 
                 // match stmt_node.overrides_data.as_ref() {
                 //     None => continue,

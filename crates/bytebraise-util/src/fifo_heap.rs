@@ -92,7 +92,7 @@ pub struct Iter<'a, T: 'a> {
 }
 
 impl<T> FifoHeap<T> {
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self.heap.iter(),
         }

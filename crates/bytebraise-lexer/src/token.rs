@@ -168,7 +168,7 @@ pub fn make_fixed_str_token(kind: TokenKind) -> Token {
 macro_rules! T {
     ['('] => { $crate::lexer::token::make_fixed_str_token($crate::lexer::token::TokenKind::OpenParenthesis) } ;
     [')'] => { $crate::lexer::token::make_fixed_str_token($crate::lexer::token::TokenKind::CloseParenthesis) } ;
-    [=] => { crate::lexer::token::make_fixed_str_token(crate::lexer::token::TokenKind::Equals) } ;
+    [=] => { $crate::lexer::token::make_fixed_str_token(crate::lexer::token::TokenKind::Equals) } ;
     [+=] => { crate::lexer::token::make_fixed_str_token(crate::lexer::token::TokenKind::PlusEquals) } ;
     [=+] => { crate::lexer::token::make_fixed_str_token(crate::lexer::token::TokenKind::EqualsPlus) } ;
     [.=] => { crate::lexer::token::make_fixed_str_token(crate::lexer::token::TokenKind::DotEquals) } ;

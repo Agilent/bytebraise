@@ -34,11 +34,10 @@ impl VariableParse {
     pub fn var_sub(&mut self, caps: &Captures) -> DataSmartResult<String> {
         let match_str = caps.get(0).unwrap().as_str();
         let referenced_var = &match_str[2..match_str.len() - 1];
-        if let Some(var) = &self.name {
-            if var.as_str() == referenced_var {
+        if let Some(var) = &self.name
+            && var.as_str() == referenced_var {
                 return Err(DataSmartError::RecursiveReferenceError { var: var.clone() }.into());
             }
-        }
         self.references.insert(referenced_var.to_string());
         Ok(self
             .d
