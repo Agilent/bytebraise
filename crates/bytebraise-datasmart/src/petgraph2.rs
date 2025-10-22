@@ -25,9 +25,7 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::get_var;
-use crate::nodes::{
-    GraphItem, ScoredOperation, StatementKind, StmtNode,
-};
+use crate::nodes::{GraphItem, ScoredOperation, StatementKind, StmtNode};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
@@ -494,8 +492,6 @@ impl DataSmart {
 
         // TODO: optimize for same index
 
-
-
         tracing::info!("{:?} {:?}", new_var_index, old_var_index);
 
         let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
@@ -514,7 +510,6 @@ impl DataSmart {
                 continue;
             }
         }
-
 
         //dbg!(&self.ds);
 

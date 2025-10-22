@@ -18,7 +18,10 @@ fn main() {
     let opts = Opts::parse();
     let mut data = String::new();
 
-    File::open(opts.file).unwrap().read_to_string(&mut data).unwrap();
+    File::open(opts.file)
+        .unwrap()
+        .read_to_string(&mut data)
+        .unwrap();
 
     let parsed = parse_bitbake_from_str(&data);
 
