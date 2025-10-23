@@ -2,6 +2,7 @@ mod del_var;
 mod expand_keys;
 mod keys;
 mod mixed_operators;
+mod quirks;
 mod rename_var;
 
 #[cfg(test)]

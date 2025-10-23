@@ -51,6 +51,7 @@ use std::fs::File;
 use std::io::Write;
 use std::ops::Deref;
 
+// TODO: check for latest version in upstream bitbake
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
 
@@ -251,12 +252,9 @@ impl DataSmart {
         let var = var.into();
 
         //dbg!(&var);
-
-        let var_parts = var.split_once(':');
-        let base = var_parts.map_or(var.as_str(), |parts| parts.0);
-        let override_str = var_parts.map(|parts| parts.1);
-
-        let stmt_node = build_statement(normal_operator, override_str, value.into())?;
+        let parsed = parse_statement(&var, normal_operator, value.into())?;
+        let base = parsed.var_base;
+        let stmt_node = parsed.stmt;
         let operator_kind = stmt_node.operator;
 
         // TODO: if parsing, and no keyword given, then wipe away removes, prepends, and appends
@@ -974,14 +972,22 @@ impl DataSmart {
 
                 match &stmt_node.kind {
                     // e.g. A:b:append:c
+                    //
                     StatementKind::Operation { scope, filter, .. } => {
                         // Yield the override variant (for "A:b:append:c" that is "A:b"), unless ${} ... TODO
                         let mut parts = vec![var.0.clone()];
                         parts.extend(scope.into_iter().cloned());
                         ret.insert(parts.join(":"));
 
-                        // TODO: decompose
-                        // TODO: handle unexpanded filter
+                        // Lop off parts of the scope until we find one that isn't active
+                        while let Some(last) = parts.last()
+                            && override_state.contains(last)
+                            // BitBake treats A:${Q} as a var called 'A:${Q}'
+                            && OVERRIDE_REGEX.is_match(last)
+                        {
+                            parts.pop();
+                            ret.insert(parts.join(":"));
+                        }
                     }
 
                     // e.g. A:b:c
@@ -993,7 +999,11 @@ impl DataSmart {
                         ret.insert(parts.join(":"));
 
                         // Lop off parts of the scope until we find one that isn't active
-                        while let Some(last) = parts.last() && override_state.contains(last) && OVERRIDE_REGEX.is_match(last) {
+                        while let Some(last) = parts.last()
+                            && override_state.contains(last)
+                            // BitBake treats A:${Q} as a var called 'A:${Q}'
+                            && OVERRIDE_REGEX.is_match(last)
+                        {
                             parts.pop();
                             ret.insert(parts.join(":"));
                         }
@@ -1030,12 +1040,23 @@ impl DataSmart {
     }
 }
 
-fn build_statement(
+struct ParsedStatement {
+    var_base: String,
+    stmt: StmtNode,
+}
+
+static OVERRIDE_STR_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[^A-Z]*$").unwrap());
+
+fn parse_statement(
+    var: &str,
     normal_operator: NormalOperator,
-    override_str: Option<&str>,
     mut value: String,
-) -> Option<StmtNode> {
-    match override_str {
+) -> Option<ParsedStatement> {
+    let var_parts = var.split_once(':');
+    let base = var_parts.map_or(var, |parts| parts.0);
+    let override_str = var_parts.map(|parts| parts.1);
+
+    let stmt = match override_str {
         None => Some(StmtNode {
             override_str: None,
             operator: normal_operator.into(),
@@ -1050,13 +1071,16 @@ fn build_statement(
                 .captures_read(&mut locs, override_str)
                 .is_none()
             {
-                return Some(StmtNode {
-                    override_str: Some(override_str.to_string()),
-                    operator: normal_operator.into(),
-                    kind: StatementKind::PureOverride {
-                        scope: split_overrides(override_str),
+                return Some(ParsedStatement {
+                    stmt: StmtNode {
+                        override_str: Some(override_str.to_string()),
+                        operator: normal_operator.into(),
+                        kind: StatementKind::PureOverride {
+                            scope: split_overrides(override_str),
+                        },
+                        rhs: value,
                     },
-                    rhs: value,
+                    var_base: base.to_string(),
                 });
             }
 
@@ -1099,7 +1123,23 @@ fn build_statement(
                     .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
             );
 
+            eprintln!("WAT {}", &override_str[keyword_pos.1..]);
+
             // Overrides after the keyword - conditionally applied
+            if !OVERRIDE_STR_REGEX.is_match(&override_str[keyword_pos.1..]) {
+                // If not valid, then pretend there is no override (this matches bitbake's original
+                // setvar regex behavior)
+                return Some(ParsedStatement {
+                    stmt: StmtNode {
+                        override_str: None,
+                        operator: normal_operator.into(),
+                        kind: StatementKind::Unconditional,
+                        rhs: value,
+                    },
+                    var_base: var.to_string(),
+                });
+            }
+
             let override_filter = split_overrides(&override_str[keyword_pos.1..]);
             debug_assert!(
                 !override_filter
@@ -1118,5 +1158,10 @@ fn build_statement(
                 rhs: value,
             })
         }
-    }
+    };
+
+    stmt.map(|s| ParsedStatement {
+        stmt: s,
+        var_base: base.to_string(),
+    })
 }
