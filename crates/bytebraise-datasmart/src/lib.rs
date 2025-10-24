@@ -98,3 +98,4 @@ pub(crate) mod nodes;
 pub mod petgraph2;
 mod tests;
 pub mod variable_operation;
+mod variable_parser;
