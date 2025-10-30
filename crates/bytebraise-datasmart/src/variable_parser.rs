@@ -1,8 +1,11 @@
+use crate::petgraph2;
+use crate::petgraph2::OverrideScore;
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
 use indexmap::IndexSet;
 use itertools::Itertools;
 use regex::Regex;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 static BITBAKE_OVERRIDE_REGEX: LazyLock<Regex> =
@@ -15,6 +18,7 @@ static KEYWORD_REGEX: LazyLock<Regex> =
 
 /// Statement parsing resolves the kind of variable expression (LHS), which also has an effect on the
 /// recorded value (RHS), depending on combinations of operators.
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct StatementNode2 {
     pub(crate) lhs: VariableExpression,
     pub(crate) operator: NormalOperator,
@@ -24,10 +28,30 @@ pub(crate) struct StatementNode2 {
     pub(crate) raw_rhs: String,
 }
 
+impl StatementNode2 {
+    // The operator, used for fifo heap ordering
+    pub(crate) fn resolved_operator(&self) -> Operator {
+        match &self.lhs.kind {
+            OverrideOperation { operator, .. } => (*operator).into(),
+            Assignment { .. } => self.operator.into(),
+        }
+    }
+
+    pub(crate) fn is_override_operation(&self) -> bool {
+        matches!(&self.lhs.kind, OverrideOperation { .. })
+    }
+}
+
 #[derive(Eq, PartialEq, Debug)]
 pub(crate) struct VariableExpression {
-    var_base: String,
-    kind: VariableExpressionKind,
+    pub(crate) var_base: String,
+    pub(crate) kind: VariableExpressionKind,
+}
+
+impl VariableExpression {
+    pub(crate) fn override_string(&self) -> String {
+        self.kind.override_string()
+    }
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -44,10 +68,74 @@ pub(crate) enum VariableExpressionKind {
     },
     /// e.g. B = "V"
     ///      B:a = "V"
+    // TODO: rename to normal override or something? It is also an override
     Assignment {
         // Sequence of override strings, conforming to [a-z0-9]+
         scope: Vec<String>,
     },
+}
+
+impl VariableExpressionKind {
+    pub(crate) fn is_active(
+        &self,
+        override_selection_context: &Cow<IndexSet<String>>,
+        active_overrides: &Cow<IndexSet<String>>,
+    ) -> bool {
+        match &self {
+            OverrideOperation { filter, scope, .. } => {
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+
+                // For scope, consider selection context (active set + direct variant lookup)
+                let lhs_valid = scope_set.is_subset(override_selection_context);
+
+                // For filter, consider active override set
+                let rhs_valid = filter.is_subset(active_overrides);
+
+                rhs_valid && lhs_valid
+            }
+            Assignment { scope } => {
+                let scope_set: IndexSet<String> = scope.iter().cloned().collect();
+                scope_set.is_subset(override_selection_context)
+            }
+        }
+    }
+
+    pub(crate) fn score(&self, active_overrides: &Cow<IndexSet<String>>) -> Option<OverrideScore> {
+        // The score is derived from the scope alone
+        // TODO: reimplement in terms of `override_scope`?
+        match self {
+            OverrideOperation { scope, .. } => petgraph2::score_override(active_overrides, scope),
+            Assignment { scope } => petgraph2::score_override(active_overrides, scope),
+        }
+    }
+
+    pub(crate) fn override_scope(&self) -> Vec<String> {
+        match self {
+            OverrideOperation { scope, .. } => scope.clone(),
+            Assignment { scope } => scope.clone(),
+        }
+    }
+
+    pub(crate) fn override_string(&self) -> String {
+        match self {
+            OverrideOperation {
+                scope,
+                operator,
+                filter,
+            } => {
+                let mut parts: Vec<String> = vec![];
+                parts.extend(scope.iter().cloned());
+                match operator {
+                    OverrideOperator::Append => parts.push("append".to_string()),
+                    OverrideOperator::Prepend => parts.push("prepend".to_string()),
+                    OverrideOperator::Remove => parts.push("remove".to_string()),
+                }
+                parts.extend(filter.iter().cloned());
+                parts.iter().join(":")
+            }
+            Assignment { scope } => scope.join(":"),
+        }
+    }
 }
 
 pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
@@ -137,7 +225,7 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
     }
 }
 
-fn parse_statement<V: AsRef<str>>(
+pub(crate) fn parse_statement<V: AsRef<str>>(
     var: V,
     normal_operator: NormalOperator,
     value: String,
