@@ -159,6 +159,7 @@ mod test {
     use crate::variable_parser::{VariableExpression, VariableExpressionKind, parse_variable};
     use indexmap::IndexSet;
     use pretty_assertions::{assert_eq, assert_ne};
+    use bytebraise_util::split::split_filter_empty;
 
     macro_rules! v_operator {
         (append) => {
@@ -183,7 +184,7 @@ mod test {
             VariableExpression {
                 var_base: String::from($var),
                 kind: VariableExpressionKind::Assignment {
-                    scope: ($scope).split(":").map(String::from).collect(),
+                    scope: split_filter_empty($scope, ":").map(String::from).collect(),
                 },
             }
         };
@@ -198,8 +199,8 @@ mod test {
                 var_base: String::from($var),
                 kind: VariableExpressionKind::OverrideOperation {
                     operator: v_operator!($op),
-                    filter: ($filter).split(":").map(String::from).collect(),
-                    scope: ($scope).split(":").map(String::from).collect(),
+                    filter: split_filter_empty($filter, ":").map(String::from).collect(),
+                    scope: split_filter_empty($scope, ":").map(String::from).collect(),
                 },
             }
         };
