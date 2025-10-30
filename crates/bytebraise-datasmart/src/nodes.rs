@@ -111,7 +111,6 @@ impl GraphItem {
 pub enum StatementKind {
     Operation {
         scope: Vec<String>,
-        override_operator: OverrideOperator,
         filter: IndexSet<String>,
     },
     PureOverride {

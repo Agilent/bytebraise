@@ -253,6 +253,7 @@ impl DataSmart {
 
         //dbg!(&var);
         let parsed = parse_statement(&var, normal_operator, value.into())?;
+        dbg!(&parsed);
         let base = parsed.var_base;
         let stmt_node = parsed.stmt;
         let operator_kind = stmt_node.operator;
@@ -950,6 +951,7 @@ impl DataSmart {
     }
 
     // TODO: this should return in insertion order, like BitBake?
+    //  can use IndexMap instead of FxHashMap
     pub fn get_all_keys(&self) -> Vec<String> {
         let mut ret = HashSet::new();
 
@@ -1040,6 +1042,7 @@ impl DataSmart {
     }
 }
 
+#[derive(Debug)]
 struct ParsedStatement {
     var_base: String,
     stmt: StmtNode,
@@ -1052,6 +1055,32 @@ fn parse_statement(
     normal_operator: NormalOperator,
     mut value: String,
 ) -> Option<ParsedStatement> {
+    /// This is complicated.
+    ///
+    /// Consider:
+    ///   B:a:${Q}:append:${P}:b:t = "Q"
+    ///
+    /// The presence of ${P} here means this assignment is not an append operation.
+    ///  (refer to __setvar_regexp__ in BitBake)
+    /// But we still need to handle the :b:t part. So we need to produce:
+    ///   base:    B:a:${Q}:append:${P}
+    ///   filter:  a:t
+    ///
+    /// More examples:
+    ///
+    /// This one is OK, because lowercase ${p} is allowed:
+    ///   B:a:${Q}:append:${p}:b:t = "Q"
+    /// will produce base variable:
+    ///   B:a:${Q}
+    ///
+    /// Slightly different:
+    ///   B:a:append:${p}:b:t = "Q"
+    /// then get_all_vars() gives: B:a
+    ///
+    /// If to the above we add:
+    ///   OVERRIDES = "a"
+    /// then get_all_vars() gives: B:a, B
+    ///
     let var_parts = var.split_once(':');
     let base = var_parts.map_or(var, |parts| parts.0);
     let override_str = var_parts.map(|parts| parts.1);
@@ -1126,8 +1155,9 @@ fn parse_statement(
             eprintln!("WAT {}", &override_str[keyword_pos.1..]);
 
             // Overrides after the keyword - conditionally applied
+            // TODO: use one regular expression maybe?
             if !OVERRIDE_STR_REGEX.is_match(&override_str[keyword_pos.1..]) {
-                // If not valid, then pretend there is no override (this matches bitbake's original
+                // If not valid, then pretend there is no override (this matches bitbake's originalg
                 // setvar regex behavior)
                 return Some(ParsedStatement {
                     stmt: StmtNode {
@@ -1153,7 +1183,6 @@ fn parse_statement(
                 kind: StatementKind::Operation {
                     scope: override_scope,
                     filter: IndexSet::from_iter(override_filter),
-                    override_operator,
                 },
                 rhs: value,
             })

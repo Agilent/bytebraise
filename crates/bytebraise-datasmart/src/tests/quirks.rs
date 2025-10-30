@@ -27,3 +27,25 @@ C:append:${a} = "T"
     let keys = d.get_all_keys();
     assert_eq!(keys, vec!["B:append:${A}", "C"]);
 }
+
+#[test]
+fn override_operator_get_keys_bitbake_bug() {
+    let mut d = eval(
+        r#"
+B = "A"
+B:a:${Q}:append:${P} = "Q"
+
+# The presence of ${P} here means this assignment is not an append operation.
+# But we still need to handle the :b:t part.
+B:a:${Q}:append:${P}:b:t = "Q"
+"#,
+    );
+
+    panic!();
+
+    let keys = d.get_all_keys();
+    assert_eq!(
+        keys,
+        vec!["B", "B:a:${Q}:append:${P}", "B:a:${Q}:append:${P}:b:t"]
+    );
+}

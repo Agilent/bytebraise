@@ -15,17 +15,13 @@ static KEYWORD_REGEX: LazyLock<Regex> =
 
 /// Statement parsing resolves the kind of variable expression (LHS), which also has an effect on the
 /// recorded value (RHS), depending on combinations of operators.
-/// TODO: don't bother modifying the value during parsing - instead handle it in get_var?
-pub(crate) struct ParsedStatement {
-    var_base: String,
-    statement: StatementNode2,
-}
-
 pub(crate) struct StatementNode2 {
     pub(crate) lhs: VariableExpression,
-    pub(crate) operator: Operator,
-    /// The value assigned in the statement
+    pub(crate) operator: NormalOperator,
+    /// Value assigned in the statement, possibly modified depending on combinations of operators.
     pub(crate) rhs: String,
+    /// Raw value, without taking into account operators
+    pub(crate) raw_rhs: String,
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -39,8 +35,11 @@ pub(crate) enum VariableExpressionKind {
     /// e.g. B:append:a = "V"
     OverrideOperation {
         scope: Vec<String>,
+        /// The override operator embedded in the variable expression - different from the
+        /// operator of the parent statement, which is =, +=, =+, etc.
         operator: OverrideOperator,
-        // Sequence conforming to [^A-Z]*
+        /// Sequence conforming to [^A-Z]*
+        /// In real bitbake, this is called the 'add' group in __setvar_regexp__.
         filter: IndexSet<String>,
     },
     /// e.g. B = "V"
@@ -50,25 +49,6 @@ pub(crate) enum VariableExpressionKind {
         scope: Vec<String>,
     },
 }
-
-// pub(crate) struct DataStatement {
-//     var_base: String,
-//     kind: DataStatementKind,
-// }
-//
-// pub(crate) enum DataStatementKind {
-//     OverrideOperation {
-//         scope: Vec<String>,
-//         operator: OverrideOperator,
-//         // Sequence conforming to [^A-Z]*
-//         filter: IndexSet<String>,
-//     },
-//     Assignment {
-//         operator: NormalOperator,
-//         scope: Vec<String>,
-//     }
-// }
-//
 
 pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
     let var = var.as_ref();
@@ -88,13 +68,16 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
             ret
         })
         .join(":");
+    eprintln!("base parts: {}", &base_parts);
 
     // See if an override operator is amongst the remainder
+    // If so, then parts leading up to the operator become the 'scope', and parts after the 'filter'
     let mut remainder = parts.clone();
     if let Some(operator) =
         remainder.position(|part| matches!(part, "remove" | "append" | "prepend"))
     {
-        // Check whether all parts after the operator are valid
+        // Check whether all parts after the operator are valid. (This is to match the behavior of
+        // the original bitbake __setvar_regexp__ regex).
         if remainder.all(|part| OVERRIDE_STR_REGEX.is_match(part)) {
             // Consume the scope
             let mut scope = parts
@@ -129,13 +112,14 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
         }
     }
 
-    // For leftover parts, iterate backwards and take override strings as we can. Whatever is left
-    // after that is tacked onto the base.
+    // For leftover parts, iterate backwards and take override strings as we can (as scope).
+    // Whatever is left after that is tacked onto the base.
     let mut rparts = parts.rev();
-    let scope = rparts
+    let mut scope = rparts
         .take_while_ref(|part| BITBAKE_OVERRIDE_REGEX.is_match(part))
         .map(String::from)
         .collect_vec();
+    scope.reverse();
     eprintln!("    scope: {scope:?}");
 
     let remainder = rparts.rev().join(":");
@@ -153,13 +137,55 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
     }
 }
 
+fn parse_statement<V: AsRef<str>>(
+    var: V,
+    normal_operator: NormalOperator,
+    value: String,
+) -> Option<StatementNode2> {
+    let variable_expression = parse_variable(var);
+    let mut cooked_value = value.clone();
+
+    // Need to cook the value (RHS) for certain combinations of operators
+    if let OverrideOperation {
+        operator: override_operator,
+        ..
+    } = &variable_expression.kind
+    {
+        // TODO: BitBake gives a warning when mixing these operators
+        match normal_operator {
+            NormalOperator::WeakDefault => {
+                // In BitBake, remove, append, prepend are implemented as varflags. However, ??=
+                // is implemented with the _defaultval varflag. So using ??= causes assignment
+                // to the '_defaultval' varflag of the var name, e.g. TEST:remove. This is not
+                // observable, since you can't do `getVar("TEST:remove")`. So just ignore.
+                return None;
+            }
+            NormalOperator::PlusEqual if *override_operator != OverrideOperator::Remove => {
+                // 'remove' is whitespace delimited, so don't bother adding space.
+                cooked_value = format!(" {value}");
+            }
+            NormalOperator::EqualPlus if *override_operator != OverrideOperator::Remove => {
+                // 'remove' is whitespace delimited, so don't bother adding space.
+                cooked_value = format!("{value} ");
+            }
+            _ => { /* everything else is handled no differently */ }
+        }
+    }
+
+    Some(StatementNode2 {
+        lhs: variable_expression,
+        rhs: cooked_value,
+        operator: normal_operator,
+        raw_rhs: value,
+    })
+}
+
 #[cfg(test)]
 mod test {
     use crate::variable_operation::OverrideOperator;
     use crate::variable_parser::{VariableExpression, VariableExpressionKind, parse_variable};
-    use indexmap::IndexSet;
-    use pretty_assertions::{assert_eq, assert_ne};
     use bytebraise_util::split::split_filter_empty;
+    use pretty_assertions::assert_eq;
 
     macro_rules! v_operator {
         (append) => {
@@ -174,6 +200,7 @@ mod test {
     }
 
     macro_rules! v {
+        // Assignment
         ($var:expr) => {
             VariableExpression {
                 var_base: String::from($var),
@@ -188,11 +215,15 @@ mod test {
                 },
             }
         };
+        // Override operation
         ($var:expr, scope=$scope:expr, $op:tt) => {
             v!($var, scope = $scope, $op, filter = "")
         };
         ($var:expr, $op:tt, filter=$filter:expr) => {
             v!($var, scope = "", $op, filter = $filter)
+        };
+        ($var:expr, $op:tt) => {
+            v!($var, scope = "", $op, filter = "")
         };
         ($var:expr, scope=$scope:expr, $op:tt, filter=$filter:expr) => {
             VariableExpression {
@@ -229,8 +260,32 @@ mod test {
             v!("A:A", scope = "a:b", append, filter = "a:b")
         );
         assert_eq!(parse_variable("A:append:a"), v!("A", append, filter = "a"));
-        //
-        // assert_eq!(parse_variable("A:A:t:p:${P}:t:p"), "A:A:t:p:${P}");
-        // assert_eq!(parse_variable("A:A:t:p:${p}:t:p"), "A:A:t:p:${p}");
+
+        assert_eq!(
+            parse_variable("A:A:t:p:${P}:t:p"),
+            v!("A:A:t:p:${P}", scope = "t:p")
+        );
+        assert_eq!(
+            parse_variable("A:A:t:p:${p}:t:p"),
+            v!("A:A:t:p:${p}", scope = "t:p")
+        );
+
+        assert_eq!(
+            parse_variable("B:a:${Q}:append:${P}"),
+            v!("B:a:${Q}:append:${P}")
+        );
+        assert_eq!(
+            parse_variable("B:a:${q}:append:${P}"),
+            v!("B:a:${q}:append:${P}")
+        );
+        assert_eq!(
+            parse_variable("B:a:${q}:t:append:${P}:p"),
+            v!("B:a:${q}:t:append:${P}", scope = "p")
+        );
+
+        assert_eq!(
+            parse_variable("B:a:${q}:t:append:${p}:p"),
+            v!("B", scope = "a:${q}:t", append, filter = "${p}:p")
+        );
     }
 }
