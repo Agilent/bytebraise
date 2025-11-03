@@ -52,6 +52,10 @@ impl VariableExpression {
     pub(crate) fn override_string(&self) -> String {
         self.kind.override_string()
     }
+
+    pub(crate) fn override_scope_string(&self) -> String {
+        self.kind.override_scope().join(":")
+    }
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -140,7 +144,6 @@ impl VariableExpressionKind {
 
 pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
     let var = var.as_ref();
-    eprintln!("input: {var}");
 
     let mut parts = var.split(':');
 
@@ -156,7 +159,6 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
             ret
         })
         .join(":");
-    eprintln!("base parts: {}", &base_parts);
 
     // See if an override operator is amongst the remainder
     // If so, then parts leading up to the operator become the 'scope', and parts after the 'filter'
@@ -174,16 +176,11 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
                 .map(String::from)
                 .collect_vec();
 
-            eprintln!("    valid operator");
-            eprintln!("    scope: {}", scope.join(":"));
-
             // Consume operator
             let mut operator = parts.next().unwrap();
-            eprintln!("    operator: {operator}");
 
             // Consume filter
             let filter = parts.map(String::from).collect();
-            eprintln!("    filter: {filter:?}");
             return VariableExpression {
                 var_base: base_parts,
                 kind: OverrideOperation {
@@ -208,11 +205,8 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
         .map(String::from)
         .collect_vec();
     scope.reverse();
-    eprintln!("    scope: {scope:?}");
 
     let remainder = rparts.rev().join(":");
-    eprintln!("    remainder: {remainder}");
-
     let var_base = if remainder.is_empty() {
         base_parts
     } else {

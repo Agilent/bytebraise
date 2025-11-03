@@ -28,7 +28,7 @@ use crate::macros::get_var;
 use crate::nodes::{GraphItem, ScoredOperation};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
-use crate::variable_parser::parse_statement;
+use crate::variable_parser::{parse_statement, parse_variable};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
@@ -375,35 +375,39 @@ impl DataSmart {
 
     #[tracing::instrument(skip(self), ret)]
     pub fn del_var<S: AsRef<str> + Debug>(&mut self, var: S) -> DataSmartResult<()> {
-        let var = var.as_ref();
+        let parsed = parse_variable(var);
 
-        // TODO: need to handle override_str regex.
-        //   easiest to just use `parse_expression`?
-        let (base_var, overrides) = var
-            .split_once(':')
-            .map_or((var, None), |p| (p.0, Some(p.1)));
+        // In bitbake, delVar with an override operation doesn't work:
+        //    d.delVar("TEST:append")
+        // so calls like that have no effect.
+        if matches!(parsed.kind, OverrideOperation { .. }) {
+            return Ok(());
+        }
 
-        let Some(var_index) = self.vars.get(base_var).copied() else {
+        eprintln!("lookup: {:?}", &parsed);
+
+        let Some(var_index) = self.vars.get(&parsed.var_base).copied() else {
             return Ok(());
         };
 
+        let mut stmts = vec![];
+        let mut walker = self
+            .ds
+            .neighbors_directed(var_index, Direction::Outgoing)
+            .detach();
+
         let mut deleted_all_stmts = false;
-        if let Some(o) = overrides {
-            // Find statements with this exact override
-            let mut stmts = vec![];
-            let mut walker = self
-                .ds
-                .neighbors_directed(var_index, Direction::Outgoing)
-                .detach();
-            while let Some(stmt_node_index) = walker.next_node(&self.ds) {
-                let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
-                let o2 = stmt.lhs.override_string();
-                if !o2.is_empty()
-                    && o == o2
-                {
-                    stmts.push(stmt_node_index);
-                    self.ds.remove_node(stmt_node_index);
-                }
+        while let Some(stmt_node_index) = walker.next_node(&self.ds) {
+            let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
+
+            // As above, only consider normal assignments.
+            let Assignment { scope } = &stmt.lhs.kind else {
+                continue;
+            };
+
+            if scope.join(":") == parsed.override_string() {
+                stmts.push(stmt_node_index);
+                self.ds.remove_node(stmt_node_index);
             }
 
             let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
@@ -417,34 +421,6 @@ impl DataSmart {
             if var_node.operations.is_empty() {
                 deleted_all_stmts = true;
             }
-        }
-
-        if deleted_all_stmts || overrides.is_none() {
-            // delete entire variable
-            self.vars.remove(base_var);
-
-            // No need to delete all statements if we already did it above
-            if !deleted_all_stmts {
-                // TODO: use VariableOperations instead of walking graph manually?
-                let mut walker = self
-                    .ds
-                    .neighbors_directed(var_index, Direction::Outgoing)
-                    .detach();
-
-                while let Some(stmt_node_index) = walker.next_node(&self.ds) {
-                    // Only delete the statement if another variable isn't using it
-
-                    // TODO: this should only happen in specific cases, e.g. when delVar is called
-                    //  as part of renameVar. Should come up with a special version of delVar just
-                    //  for renameVar.
-                    let c = self.ds.neighbors_undirected(stmt_node_index).count();
-                    if c <= 1 {
-                        self.ds.remove_node(stmt_node_index);
-                    }
-                }
-            }
-
-            self.ds.remove_node(var_index);
         }
 
         Ok(())
@@ -634,8 +610,7 @@ impl DataSmart {
         // Sanity check: did we actually expand everything?
         // TODO: will only be expanded if the referenced variables actually exist
         for stmt in self.ds.node_weights() {
-            if let GraphItem::StmtNode(stmt) = stmt
-            {
+            if let GraphItem::StmtNode(stmt) = stmt {
                 let o = stmt.lhs.override_string();
                 if !o.is_empty() {
                     assert!(!o.contains("${"));
@@ -689,26 +664,18 @@ impl DataSmart {
         parsing: bool,
         expand: bool,
     ) -> Option<String> {
-        let var = var.as_ref();
-        //dbg!(var);
-        // `var_base` is the root/stem part of the variable without any overrides
-        let (var_base, var_suffix) = var
-            .split_once(":")
-            .map_or_else(|| (var, None), |parts| (parts.0, Some(parts.1)));
+        let parsed = parse_variable(var);
 
-        // TODO: terminology: direct-variant lookup
-        let var_suffix = split_overrides(var_suffix.unwrap_or_default());
         // If an override-style operator is present, then it will never match so return None
         // TODO: what if someone adds one to OVERRIDES?
-        if var_suffix
-            .iter()
-            .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
-        {
+        if matches!(parsed.kind, OverrideOperation { .. }) {
             return None;
         }
 
         // Lookup the variable, otherwise return None
-        let var_entry = self.vars.get(var_base)?;
+        let var_entry = self.vars.get(&parsed.var_base)?;
+        // TODO: don't so this, just add 'override_scope' method which returns the Vec
+        let var_suffix = split_overrides(parsed.override_scope_string());
 
         let w = self.ds.node_weight(*var_entry).unwrap();
         let var_data = w.variable();

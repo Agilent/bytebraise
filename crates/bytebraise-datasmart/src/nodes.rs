@@ -102,10 +102,11 @@ pub struct ScoredOperation<'a> {
 
 impl<'a> Ord for ScoredOperation<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.score
-            .cmp(&other.score)
-            .reverse()
-            .then(self.stmt.resolved_operator().cmp(&other.stmt.resolved_operator()))
+        self.score.cmp(&other.score).reverse().then(
+            self.stmt
+                .resolved_operator()
+                .cmp(&other.stmt.resolved_operator()),
+        )
     }
 }
 
