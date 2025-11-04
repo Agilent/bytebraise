@@ -78,7 +78,6 @@ impl ExpansionState {
 pub struct DataSmart {
     ds: StableGraph<GraphItem, u8>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
-    unexpanded_operations: HashSet<EdgeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
@@ -174,7 +173,6 @@ impl DataSmart {
         DataSmart {
             ds: StableGraph::new(),
             vars: FxHashMap::default(),
-            unexpanded_operations: HashSet::new(),
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
@@ -274,12 +272,6 @@ impl DataSmart {
         });
 
         let e = self.ds.add_edge(*var_entry, stmt_idx, 0);
-
-        // If any part of the key contains '${' (not just the base), then track it as unexpanded.
-        // Use [`DataSmart::expand_vars`] to expand it later.
-        if var.contains("${") {
-            self.unexpanded_operations.insert(e);
-        }
 
         Some(*var_entry)
     }
@@ -512,13 +504,10 @@ impl DataSmart {
                     .variable_mut()
                     .operations
                     .push(op);
-                //(op);
             } else {
                 dbg!(&op_data);
             }
         }
-
-        //dbg!(&self.ds);
 
         self.del_var(old)?;
 
@@ -592,7 +581,6 @@ impl DataSmart {
         }
 
         // Sanity check: did we actually expand everything?
-        // TODO: will only be expanded if the referenced variables actually exist
         for stmt in self.ds.node_weights() {
             if let GraphItem::StmtNode(stmt) = stmt {
                 let o = stmt.lhs.override_string();
