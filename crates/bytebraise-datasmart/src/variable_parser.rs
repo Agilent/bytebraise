@@ -56,6 +56,10 @@ impl VariableExpression {
     pub(crate) fn override_scope_string(&self) -> String {
         self.kind.override_scope().join(":")
     }
+
+    pub(crate) fn override_scope(&self) -> Vec<String> {
+        self.kind.override_scope()
+    }
 }
 
 #[derive(Eq, PartialEq, Debug)]

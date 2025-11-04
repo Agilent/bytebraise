@@ -572,38 +572,22 @@ impl DataSmart {
     ///
     #[tracing::instrument(skip_all)]
     pub fn expand_keys(&mut self) -> DataSmartResult<Vec<String>> {
-        let mut unexpanded_operations = std::mem::take(&mut self.unexpanded_operations);
-        //dbg!(&unexpanded_operations);
-
-        let mut operations = BTreeMap::new();
-
-        // TODO: if not all 'override' operations, then need to actually do renameKey?
-        // Reconstruct the unexpanded keys
-        for edge in unexpanded_operations.drain() {
-            let node = self.ds.edge_endpoints(edge).unwrap();
-            let nodes = self.ds.index_twice_mut(node.0, node.1);
-
-            let mut var_parts = vec![nodes.0.variable().name.clone()];
-
-            // Take all the override str, including any operation (e.g. append)
-            let b = nodes.1.statement().lhs.override_string();
-            if !b.is_empty() {
-                debug_assert!(!b.starts_with(":"));
-                var_parts.extend(split_overrides(&b));
+        let mut todolist = BTreeMap::new();
+        for key in self.get_all_keys() {
+            if !key.contains("${") {
+                continue;
             }
 
-            dbg!(&nodes.1.statement());
-            eprintln!("{:?}", &var_parts);
+            let expanded = self.expand(&key)?;
+            if key == expanded {
+                continue;
+            }
 
-            let new_var = var_parts.join(":");
-            let expanded = self.expand(&new_var)?;
-            operations.insert(new_var, expanded);
+            todolist.insert(key, expanded);
         }
 
-        tracing::info!("operations: {:?}", &operations);
-
-        let ret = operations.keys().cloned().sorted().collect_vec();
-        for o in operations.into_iter() {
+        let ret = todolist.keys().cloned().sorted().collect_vec();
+        for o in todolist.into_iter() {
             self.rename_var(o.0, o.1)?;
         }
 
@@ -949,65 +933,27 @@ impl DataSmart {
                 let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
                 dbg!(stmt_node);
 
-                // TODO: check if edge between var and statement is already recorded in 'unexpanded' map to save time?
+                let scope = stmt_node.lhs.override_scope();
+                let mut parts = vec![var.0.clone()];
+                parts.extend(scope.into_iter());
+                ret.insert(parts.join(":"));
 
-                match &stmt_node.lhs.kind {
-                    // e.g. A:b:append:c
-                    //
-                    OverrideOperation { scope, filter, .. } => {
-                        // Yield the override variant (for "A:b:append:c" that is "A:b"), unless ${} ... TODO
-                        let mut parts = vec![var.0.clone()];
-                        parts.extend(scope.into_iter().cloned());
-                        ret.insert(parts.join(":"));
-
-                        // Lop off parts of the scope until we find one that isn't active
-                        while let Some(last) = parts.last()
-                            && override_state.contains(last)
-                            // BitBake treats A:${Q} as a var called 'A:${Q}'
-                            && OVERRIDE_REGEX.is_match(last)
-                        {
-                            parts.pop();
-                            ret.insert(parts.join(":"));
-                        }
-                    }
-
-                    // e.g. A:b:c
-                    Assignment { scope } => {
-                        dbg!(&stmt_node.lhs);
-
-                        let mut parts = vec![var.0.clone()];
-                        parts.extend(scope.into_iter().cloned());
-                        ret.insert(parts.join(":"));
-
-                        dbg!(&ret);
-
-                        // Lop off parts of the scope until we find one that isn't active
-                        while let Some(last) = parts.last()
-                            && override_state.contains(last)
-                            // BitBake treats A:${Q} as a var called 'A:${Q}'
-                            && OVERRIDE_REGEX.is_match(last)
-                        {
-                            parts.pop();
-                            ret.insert(parts.join(":"));
-                        }
-                    }
+                // Lop off parts of the scope until we find one that isn't active
+                while let Some(last) = parts.last()
+                    && override_state.contains(last)
+                    // BitBake treats A:${Q} as a var called 'A:${Q}'
+                    && OVERRIDE_REGEX.is_match(last)
+                {
+                    parts.pop();
+                    ret.insert(parts.join(":"));
                 }
 
-                if stmt_node
-                    .lhs
-                    .kind
-                    .is_active(&Cow::Owned(IndexSet::default()), &override_state)
-                {}
-
-                // match stmt_node.overrides_data.as_ref() {
-                //     None => continue,
-                //     Some(o) => {
-                //         dbg!(&stmt_node);
-                //         match o {
-                //             StatementOverrides::Operation { scope, filter, .. } => {}
-                //             StatementOverrides::PureOverride { .. } => {}
-                //         }
-                //     }
+                // if stmt_node
+                //     .lhs
+                //     .kind
+                //     .is_active(&Cow::Owned(IndexSet::default()), &override_state)
+                // {
+                //     todo!();
                 // }
             }
         }
