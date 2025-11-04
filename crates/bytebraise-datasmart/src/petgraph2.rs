@@ -973,11 +973,13 @@ impl DataSmart {
 
                     // e.g. A:b:c
                     Assignment { scope } => {
-                        debug_assert!(!scope.is_empty());
+                        dbg!(&stmt_node.lhs);
 
                         let mut parts = vec![var.0.clone()];
                         parts.extend(scope.into_iter().cloned());
                         ret.insert(parts.join(":"));
+
+                        dbg!(&ret);
 
                         // Lop off parts of the scope until we find one that isn't active
                         while let Some(last) = parts.last()

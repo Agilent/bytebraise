@@ -40,8 +40,8 @@ B:a:${Q}:append:${P} = "Q"
 B:a:${Q}:append:${P}:b:t = "Q"
 "#,
     );
+    todo!();
 
-    panic!();
 
     let keys = d.get_all_keys();
     assert_eq!(
