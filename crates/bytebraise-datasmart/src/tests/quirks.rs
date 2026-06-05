@@ -1,3 +1,6 @@
+#[cfg(test)]
+use crate::evaluate::eval;
+
 #[test]
 fn override_operator_filter_casing() {
     // In BitBake, __setvar_regexp__ is:

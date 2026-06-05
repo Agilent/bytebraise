@@ -1,3 +1,6 @@
+#[cfg(test)]
+use crate::evaluate::eval;
+
 #[test]
 fn basic_keys_1() {
     let mut d = eval(
