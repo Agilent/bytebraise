@@ -24,7 +24,7 @@ Major todos:
 
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
-use crate::macros::get_var;
+use crate::macros::{get_var, set_var, set_var_ex};
 use crate::nodes::{GraphItem, ScoredOperation};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
@@ -38,7 +38,6 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
-use petgraph::data::DataMap;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
@@ -216,34 +215,59 @@ impl DataSmart {
         val
     }
 
-    pub fn plus_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::PlusEqual);
-    }
-
-    pub fn equals_plus_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::EqualPlus);
-    }
-
-    pub fn equals_dot_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::EqualDot);
-    }
-
-    pub fn dot_equals_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::DotEqual);
-    }
-
-    pub fn weak_default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::WeakDefault);
-    }
-
-    pub fn default_var<T: Into<String>, S: Into<String>>(&mut self, var: T, value: S) {
-        self.set_var_ex(var, value, NormalOperator::Default);
-    }
-
-    fn set_var_ex<T: Into<String>, S: Into<String>>(
+    pub fn plus_equals_var<T: Into<String> + Debug, S: Into<String> + Debug>(
         &mut self,
         var: T,
         value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::PlusEqual);
+    }
+
+    pub fn equals_plus_var<T: Into<String> + Debug, S: Into<String> + Debug>(
+        &mut self,
+        var: T,
+        value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::EqualPlus);
+    }
+
+    pub fn equals_dot_var<T: Into<String> + Debug, S: Into<String> + Debug>(
+        &mut self,
+        var: T,
+        value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::EqualDot);
+    }
+
+    pub fn dot_equals_var<T: Into<String> + Debug, S: Into<String> + Debug>(
+        &mut self,
+        var: T,
+        value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::DotEqual);
+    }
+
+    pub fn weak_default_var<T: Into<String> + Debug, S: Into<String> + Debug>(
+        &mut self,
+        var: T,
+        value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::WeakDefault);
+    }
+
+    pub fn default_var<T: Into<String> + Debug, S: Into<String> + Debug>(
+        &mut self,
+        var: T,
+        value: S,
+    ) {
+        set_var_ex!(self, var, value, operator = NormalOperator::Default);
+    }
+
+    pub fn set_var_ex<T: Into<String>, S: Into<String>>(
+        &mut self,
+        var: T,
+        value: S,
+        parsing: bool,
         normal_operator: NormalOperator,
     ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
@@ -281,6 +305,7 @@ impl DataSmart {
         &mut self,
         var: T,
         value: S,
+        parsing: bool,
     ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
         let value = value.into();
@@ -292,7 +317,7 @@ impl DataSmart {
             );
         }
 
-        self.set_var_ex(var, value, NormalOperator::Assign)
+        self.set_var_ex(var, value, parsing, NormalOperator::Assign)
     }
 
     #[tracing::instrument(skip(self), ret)]
@@ -460,7 +485,7 @@ impl DataSmart {
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
             // TODO: parsing mode?
-            self.set_var(new, old_val);
+            set_var!(self, new, old_val, parsing = true);
         }
 
         // Next, transplant :appends, :prepends, and :removes

@@ -8,7 +8,7 @@ mod rename_var;
 #[cfg(test)]
 mod test {
     use crate::evaluate::eval;
-    use crate::macros::get_var;
+    use crate::macros::{get_var, set_var};
     use crate::petgraph2::{DataSmart, score_override};
     use indexmap::IndexSet;
     use std::borrow::Cow;
@@ -50,9 +50,9 @@ A .= "5"
     #[test]
     fn multiple_append() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:append", "2");
-        d.set_var("TEST:append", "2");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:append", "2");
+        set_var!(&mut d, "TEST:append", "2");
 
         assert_eq!(get_var!(&d, "TEST"), Some("122".into()));
     }
@@ -60,9 +60,9 @@ A .= "5"
     #[test]
     fn override_score() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
-        d.set_var("TEST:more:specific", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more", "2");
+        set_var!(&mut d, "TEST:more:specific", "3");
 
         assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
@@ -70,10 +70,10 @@ A .= "5"
     #[test]
     fn override_score_2() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
-        d.set_var("TEST:more:specific", "3");
-        d.set_var("OVERRIDES", "more");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more", "2");
+        set_var!(&mut d, "TEST:more:specific", "3");
+        set_var!(&mut d, "OVERRIDES", "more");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
@@ -81,10 +81,10 @@ A .= "5"
     #[test]
     fn override_score_3() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
-        d.set_var("TEST:more:specific", "3");
-        d.set_var("OVERRIDES", "more:specific");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more", "2");
+        set_var!(&mut d, "TEST:more:specific", "3");
+        set_var!(&mut d, "OVERRIDES", "more:specific");
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
@@ -92,13 +92,13 @@ A .= "5"
     #[test]
     fn override_score_4() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more:append", "2");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more:append", "2");
 
         // All applicable overrides (at the same score level) are applied.
-        d.set_var("TEST:more:specific", "3");
-        d.set_var("TEST:more:specific", "4");
-        d.set_var("OVERRIDES", "more:specific");
+        set_var!(&mut d, "TEST:more:specific", "3");
+        set_var!(&mut d, "TEST:more:specific", "4");
+        set_var!(&mut d, "OVERRIDES", "more:specific");
 
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
@@ -106,13 +106,13 @@ A .= "5"
     #[test]
     fn override_score_5() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
-        d.set_var("TEST:more:specific", "3");
-        d.set_var("TEST:more:specific", "4");
-        d.set_var("TEST:more", "5");
-        d.set_var("TEST:more", "6");
-        d.set_var("OVERRIDES", "more");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more", "2");
+        set_var!(&mut d, "TEST:more:specific", "3");
+        set_var!(&mut d, "TEST:more:specific", "4");
+        set_var!(&mut d, "TEST:more", "5");
+        set_var!(&mut d, "TEST:more", "6");
+        set_var!(&mut d, "OVERRIDES", "more");
 
         assert_eq!(get_var!(&d, "TEST"), Some("6".into()));
     }
@@ -120,13 +120,13 @@ A .= "5"
     #[test]
     fn override_score_6() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:more", "2");
-        d.set_var("TEST:more:specific", "3");
-        d.set_var("TEST:more:specific", "4");
-        d.set_var("TEST:more", "5");
-        d.set_var("TEST:more", "6");
-        d.set_var("OVERRIDES", "");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:more", "2");
+        set_var!(&mut d, "TEST:more:specific", "3");
+        set_var!(&mut d, "TEST:more:specific", "4");
+        set_var!(&mut d, "TEST:more", "5");
+        set_var!(&mut d, "TEST:more", "6");
+        set_var!(&mut d, "OVERRIDES", "");
 
         assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
@@ -134,8 +134,8 @@ A .= "5"
     #[test]
     fn override_score_7() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:append", "2");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:append", "2");
 
         assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
@@ -143,9 +143,9 @@ A .= "5"
     #[test]
     fn override_score_8() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
 
         assert_eq!(get_var!(&d, "TEST"), Some("23".into()));
     }
@@ -153,10 +153,10 @@ A .= "5"
     #[test]
     fn override_score_9() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
 
         assert_eq!(get_var!(&d, "TEST"), Some("234".into()));
     }
@@ -164,11 +164,11 @@ A .= "5"
     #[test]
     fn override_score_10() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:append:a", "NO");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:append:a", "NO");
 
         assert_eq!(get_var!(&d, "TEST"), Some("234".into()));
     }
@@ -176,12 +176,12 @@ A .= "5"
     #[test]
     fn override_score_11() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "BASE");
-        d.set_var("OVERRIDES", "b");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "BASE");
+        set_var!(&mut d, "OVERRIDES", "b");
 
         assert_eq!(get_var!(&d, "TEST"), Some("BASE34".into()));
     }
@@ -189,13 +189,13 @@ A .= "5"
     #[test]
     fn override_score_12() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "BASE");
-        d.set_var("TEST:b", "OH YES");
-        d.set_var("OVERRIDES", "b");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "BASE");
+        set_var!(&mut d, "TEST:b", "OH YES");
+        set_var!(&mut d, "OVERRIDES", "b");
 
         assert_eq!(get_var!(&d, "TEST"), Some("OH YESBASE34".into()));
     }
@@ -203,14 +203,14 @@ A .= "5"
     #[test]
     fn override_score_13() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "BASE");
-        d.set_var("TEST:b", "OH YES");
-        d.set_var("TEST:c", "WHAT");
-        d.set_var("OVERRIDES", "b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "BASE");
+        set_var!(&mut d, "TEST:b", "OH YES");
+        set_var!(&mut d, "TEST:c", "WHAT");
+        set_var!(&mut d, "OVERRIDES", "b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("WHAT34".into()));
     }
@@ -218,15 +218,15 @@ A .= "5"
     #[test]
     fn override_score_14() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "BASE");
-        d.set_var("TEST:b", "OH YES");
-        d.set_var("TEST:c", "WHAT");
-        d.set_var("TEST:c:append", "!");
-        d.set_var("OVERRIDES", "b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "BASE");
+        set_var!(&mut d, "TEST:b", "OH YES");
+        set_var!(&mut d, "TEST:c", "WHAT");
+        set_var!(&mut d, "TEST:c:append", "!");
+        set_var!(&mut d, "OVERRIDES", "b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("WHAT!34".into()));
     }
@@ -234,16 +234,16 @@ A .= "5"
     #[test]
     fn override_score_15() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "BASE");
-        d.set_var("TEST:b", "OH YES");
-        d.set_var("TEST:c:prepend", "Q");
-        d.set_var("TEST:c", "WHAT");
-        d.set_var("TEST:c:append", "!");
-        d.set_var("OVERRIDES", "b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "BASE");
+        set_var!(&mut d, "TEST:b", "OH YES");
+        set_var!(&mut d, "TEST:c:prepend", "Q");
+        set_var!(&mut d, "TEST:c", "WHAT");
+        set_var!(&mut d, "TEST:c:append", "!");
+        set_var!(&mut d, "OVERRIDES", "b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
     }
@@ -251,9 +251,9 @@ A .= "5"
     #[test]
     fn override_score_16() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "10");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
+        set_var!(&mut d, "TEST", "10");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
 
         assert_eq!(get_var!(&d, "TEST"), Some("1034".into()));
     }
@@ -261,11 +261,11 @@ A .= "5"
     #[test]
     fn override_score_17() {
         let mut d = DataSmart::new();
-        d.set_var("TEST:append", "why?");
-        d.set_var("TEST:a:b:append", "first");
-        d.set_var("TEST:a:b:${OP}", "OP");
-        d.set_var("OP", "append");
-        d.set_var("OVERRIDES", "a:b");
+        set_var!(&mut d, "TEST:append", "why?");
+        set_var!(&mut d, "TEST:a:b:append", "first");
+        set_var!(&mut d, "TEST:a:b:${OP}", "OP");
+        set_var!(&mut d, "OP", "append");
+        set_var!(&mut d, "OVERRIDES", "a:b");
 
         d.expand_keys().unwrap();
 
@@ -275,16 +275,16 @@ A .= "5"
     #[test]
     fn override_score_18() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST", "2");
-        d.set_var("TEST:append", "3");
-        d.set_var("TEST:append", "4");
-        d.set_var("TEST:b:append", "base");
-        d.set_var("TEST:b", "OH YES");
-        d.set_var("TEST:c:prepend", "Q");
-        d.set_var("TEST:c", "WHAT");
-        d.set_var("TEST:c:append", "!");
-        d.set_var("OVERRIDES", "b:c:");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST", "2");
+        set_var!(&mut d, "TEST:append", "3");
+        set_var!(&mut d, "TEST:append", "4");
+        set_var!(&mut d, "TEST:b:append", "base");
+        set_var!(&mut d, "TEST:b", "OH YES");
+        set_var!(&mut d, "TEST:c:prepend", "Q");
+        set_var!(&mut d, "TEST:c", "WHAT");
+        set_var!(&mut d, "TEST:c:append", "!");
+        set_var!(&mut d, "OVERRIDES", "b:c:");
 
         assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
     }
@@ -292,11 +292,11 @@ A .= "5"
     #[test]
     fn override_priority_order() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a", "2");
-        d.set_var("TEST:b", "3");
-        d.set_var("TEST:b:a", "6");
-        d.set_var("TEST:a:b", "5");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a", "2");
+        set_var!(&mut d, "TEST:b", "3");
+        set_var!(&mut d, "TEST:b:a", "6");
+        set_var!(&mut d, "TEST:a:b", "5");
 
         score("");
         score("a");
@@ -304,7 +304,7 @@ A .= "5"
         score("b:a");
         score("a:b");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
@@ -312,47 +312,47 @@ A .= "5"
     #[test]
     fn override_priority_order_2() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a", "2");
-        d.set_var("TEST:b", "3");
-        d.set_var("TEST:a:b", "5");
-        d.set_var("TEST:b:a", "6");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a", "2");
+        set_var!(&mut d, "TEST:b", "3");
+        set_var!(&mut d, "TEST:a:b", "5");
+        set_var!(&mut d, "TEST:b:a", "6");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
 
     fn override_priority_order_3() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:c:b:a", "2");
-        d.set_var("TEST:a:b:c", "3");
-        d.set_var("TEST:c:a:b", "4");
-        d.set_var("TEST:b:a:c", "5");
-        d.set_var("TEST:b:c:a", "6");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:c:b:a", "2");
+        set_var!(&mut d, "TEST:a:b:c", "3");
+        set_var!(&mut d, "TEST:c:a:b", "4");
+        set_var!(&mut d, "TEST:b:a:c", "5");
+        set_var!(&mut d, "TEST:b:c:a", "6");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     fn override_priority_order_4() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a", "2");
-        d.set_var("TEST:a:a", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a", "2");
+        set_var!(&mut d, "TEST:a:a", "3");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
     #[test]
     fn override_selection_order_sensitivity() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:b:a:append", "2");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:b:a:append", "2");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
@@ -360,10 +360,10 @@ A .= "5"
     #[test]
     fn override_selection_order_sensitivity_2() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:b:a:append", "2");
-        d.set_var("TEST:a:b:append", "3");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:b:a:append", "2");
+        set_var!(&mut d, "TEST:a:b:append", "3");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
@@ -371,10 +371,10 @@ A .= "5"
     #[test]
     fn override_selection_order_sensitivity_3() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b:append", "3");
-        d.set_var("TEST:b:a:append", "2");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b:append", "3");
+        set_var!(&mut d, "TEST:b:a:append", "2");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
@@ -382,11 +382,11 @@ A .= "5"
     #[test]
     fn override_selection_order_sensitivity_4() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b:append", "3");
-        d.set_var("TEST:b:a:append", "2");
-        d.set_var("TEST:a:b:a:append", "4");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b:append", "3");
+        set_var!(&mut d, "TEST:b:a:append", "2");
+        set_var!(&mut d, "TEST:a:b:a:append", "4");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         score("ab");
         score("ba");
@@ -401,9 +401,9 @@ A .= "5"
     #[test]
     fn tricky_1() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:c:b", "2");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:c:b", "2");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
@@ -411,18 +411,18 @@ A .= "5"
     #[test]
     fn tricky_2() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:c:b:a:b:c", "2");
-        d.set_var("TEST:a:b:c", "3");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:c:b:a:b:c", "2");
+        set_var!(&mut d, "TEST:a:b:c", "3");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
 
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b:c", "3");
-        d.set_var("TEST:c:b:a:b:c", "2");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b:c", "3");
+        set_var!(&mut d, "TEST:c:b:a:b:c", "2");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
@@ -430,18 +430,18 @@ A .= "5"
     #[test]
     fn tricky_3() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b:c", "3");
-        d.set_var("TEST:a:b:c:a", "4");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b:c", "3");
+        set_var!(&mut d, "TEST:a:b:c:a", "4");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
 
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b:c:a", "4");
-        d.set_var("TEST:a:b:c", "3");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b:c:a", "4");
+        set_var!(&mut d, "TEST:a:b:c", "3");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
@@ -449,9 +449,9 @@ A .= "5"
     #[test]
     fn filter_order_sensitivity() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1");
-        d.set_var("TEST:append:b:a", "2");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:append:b:a", "2");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
@@ -459,10 +459,10 @@ A .= "5"
     #[test]
     fn order_of_operations() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1 2 3");
-        d.set_var("TEST:${B}", "2");
-        d.set_var("TEST:append", " 4");
-        d.set_var("B", "remove");
+        set_var!(&mut d, "TEST", "1 2 3");
+        set_var!(&mut d, "TEST:${B}", "2");
+        set_var!(&mut d, "TEST:append", " 4");
+        set_var!(&mut d, "B", "remove");
 
         d.expand_keys().unwrap();
 
@@ -472,11 +472,11 @@ A .= "5"
     #[test]
     fn indirection_1() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1 2 3");
-        d.set_var("TEST:${${B}}", "2");
-        d.set_var("B", "${W}");
-        d.set_var("W", "Q");
-        d.set_var("Q", "remove");
+        set_var!(&mut d, "TEST", "1 2 3");
+        set_var!(&mut d, "TEST:${${B}}", "2");
+        set_var!(&mut d, "B", "${W}");
+        set_var!(&mut d, "W", "Q");
+        set_var!(&mut d, "Q", "remove");
 
         d.expand_keys().unwrap();
 
@@ -487,14 +487,14 @@ A .= "5"
     #[test]
     fn indirection_and_order() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1 2 3");
+        set_var!(&mut d, "TEST", "1 2 3");
 
-        d.set_var("TEST:${${B}}", " 4 ");
-        d.set_var("B", "${W}");
-        d.set_var("W", "Q");
-        d.set_var("Q", "append");
+        set_var!(&mut d, "TEST:${${B}}", " 4 ");
+        set_var!(&mut d, "B", "${W}");
+        set_var!(&mut d, "W", "Q");
+        set_var!(&mut d, "Q", "append");
 
-        d.set_var("TEST:append", " 5 ");
+        set_var!(&mut d, "TEST:append", " 5 ");
 
         d.expand_keys().unwrap();
 
@@ -505,17 +505,17 @@ A .= "5"
     #[test]
     fn indirection_and_order_and_score() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "1 2 3");
+        set_var!(&mut d, "TEST", "1 2 3");
 
-        d.set_var("TEST:${${B}}", " 4 ");
-        d.set_var("B", "${W}");
-        d.set_var("W", "Q");
-        d.set_var("Q", "append");
+        set_var!(&mut d, "TEST:${${B}}", " 4 ");
+        set_var!(&mut d, "B", "${W}");
+        set_var!(&mut d, "W", "Q");
+        set_var!(&mut d, "Q", "append");
 
-        d.set_var("TEST:append", " 5 ");
+        set_var!(&mut d, "TEST:append", " 5 ");
 
-        d.set_var("TEST:b:append", "OK");
-        d.set_var("OVERRIDES", "b");
+        set_var!(&mut d, "TEST:b:append", "OK");
+        set_var!(&mut d, "OVERRIDES", "b");
 
         d.expand_keys().unwrap();
 
@@ -546,17 +546,17 @@ B = ":append"
         // The behavior of appends vs synthesized appends is different.
         // Normal appends stack:
         // let mut d = DataSmart::new();
-        // d.set_var("TEST", "10");
-        // d.set_var("TEST:append", "1");
-        // d.set_var("TEST:append", "2");
+        // set_var!(&mut d, "TEST", "10");
+        // set_var!(&mut d, "TEST:append", "1");
+        // set_var!(&mut d, "TEST:append", "2");
         // assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
 
         // But synthesized appends only take the last one:
         let mut d = DataSmart::new();
-        d.set_var("TEST", "10");
-        d.set_var("TEST:${A}", "1");
-        d.set_var("TEST:${A}", "2");
-        d.set_var("A", "append");
+        set_var!(&mut d, "TEST", "10");
+        set_var!(&mut d, "TEST:${A}", "1");
+        set_var!(&mut d, "TEST:${A}", "2");
+        set_var!(&mut d, "A", "append");
         let p = d.expand_keys().unwrap();
         assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
@@ -564,7 +564,7 @@ B = ":append"
     #[test]
     fn plus_equals() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "base");
+        set_var!(&mut d, "TEST", "base");
         d.plus_equals_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("base 2".into()));
     }
@@ -579,7 +579,7 @@ B = ":append"
     #[test]
     fn dot_equals() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "base");
+        set_var!(&mut d, "TEST", "base");
         d.dot_equals_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("base2".into()));
     }
@@ -594,7 +594,7 @@ B = ":append"
     #[test]
     fn equals_plus() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "base");
+        set_var!(&mut d, "TEST", "base");
         d.equals_plus_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("2 base".into()));
     }
@@ -609,7 +609,7 @@ B = ":append"
     #[test]
     fn equals_dot() {
         let mut d = DataSmart::new();
-        d.set_var("TEST", "base");
+        set_var!(&mut d, "TEST", "base");
         d.equals_dot_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("2base".into()));
     }
@@ -646,7 +646,7 @@ B = ":append"
 
         let mut d = DataSmart::new();
         d.weak_default_var("W", "x");
-        d.set_var("W:append", "y");
+        set_var!(&mut d, "W:append", "y");
         assert_eq!(get_var!(&d, "W"), Some("xy".into()));
     }
 
@@ -658,7 +658,7 @@ B = ":append"
         d.weak_default_var("TEST:a:b", "4");
         d.weak_default_var("TEST:b", "5");
 
-        d.set_var("OVERRIDES", "a:b");
+        set_var!(&mut d, "OVERRIDES", "a:b");
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
@@ -666,10 +666,10 @@ B = ":append"
     fn weak_default_append() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST", "");
-        d.set_var("TEST:append", "wat");
+        set_var!(&mut d, "TEST", "");
+        set_var!(&mut d, "TEST:append", "wat");
         d.weak_default_var("TEST:a", "OK");
-        d.set_var("OVERRIDES", "a:b");
+        set_var!(&mut d, "OVERRIDES", "a:b");
 
         assert_eq!(get_var!(&d, "TEST"), Some("OKwat".into()));
     }
@@ -678,12 +678,12 @@ B = ":append"
     fn append_interactions() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b", "2");
-        d.set_var("TEST:a:b:a:append", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b", "2");
+        set_var!(&mut d, "TEST:a:b:a:append", "3");
         d.plus_equals_var("TEST:a:b:a", "5");
         d.plus_equals_var("TEST:a:b", "6");
-        d.set_var("OVERRIDES", "a:b");
+        set_var!(&mut d, "OVERRIDES", "a:b");
 
         assert_eq!(get_var!(&d, "TEST"), Some(" 53".into()));
     }
@@ -692,16 +692,16 @@ B = ":append"
     fn more_synthesized_appends() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b", "2");
-        d.set_var("TEST:a:b:a:append", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b", "2");
+        set_var!(&mut d, "TEST:a:b:a:append", "3");
         d.plus_equals_var("TEST:a:b:a", "5");
 
-        d.set_var("A", "a");
-        d.set_var("TEST:${A}:b:a:append", "7");
-        d.set_var("TEST:${A}:b:a:append", "7");
+        set_var!(&mut d, "A", "a");
+        set_var!(&mut d, "TEST:${A}:b:a:append", "7");
+        set_var!(&mut d, "TEST:${A}:b:a:append", "7");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         //assert_eq!(get_var!(&d, "TEST"), Some(" 53".into()));
 
@@ -717,22 +717,22 @@ B = ":append"
     fn more_synthesized_appends_2() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST", "1");
-        d.set_var("TEST:a:b", "2");
-        d.set_var("TEST:a:b:a:append", "3");
+        set_var!(&mut d, "TEST", "1");
+        set_var!(&mut d, "TEST:a:b", "2");
+        set_var!(&mut d, "TEST:a:b:a:append", "3");
         d.plus_equals_var("TEST:a:b:a", "5");
         d.plus_equals_var("TEST:a:b", "6");
 
-        d.set_var("OP", "append");
-        d.set_var("TEST:a:b:${OP}", "Q");
+        set_var!(&mut d, "OP", "append");
+        set_var!(&mut d, "TEST:a:b:${OP}", "Q");
 
-        d.set_var("A", "a");
-        d.set_var("TEST:${A}:b:a:${OP}", "7");
-        d.set_var("TEST:${A}:b:a:${OP}", "7");
+        set_var!(&mut d, "A", "a");
+        set_var!(&mut d, "TEST:${A}:b:a:${OP}", "7");
+        set_var!(&mut d, "TEST:${A}:b:a:${OP}", "7");
 
-        d.set_var("TEST:a:append:${B}", "10");
+        set_var!(&mut d, "TEST:a:append:${B}", "10");
 
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         d.get_all_keys();
         //d.expand_keys().unwrap();
@@ -772,7 +772,7 @@ B = ":append"
 
         d.weak_default_var("TEST:a", "2");
         d.default_var("TEST", "1");
-        d.set_var("OVERRIDES", "a:b:c");
+        set_var!(&mut d, "OVERRIDES", "a:b:c");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
@@ -781,9 +781,9 @@ B = ":append"
     fn finalization() {
         let mut d = DataSmart::new();
 
-        d.set_var("A${B}", "X");
-        d.set_var("B", "2");
-        d.set_var("A2", "Y");
+        set_var!(&mut d, "A${B}", "X");
+        set_var!(&mut d, "B", "2");
+        set_var!(&mut d, "A2", "Y");
 
         d.expand_keys().unwrap();
         assert_eq!(get_var!(&d, "A2"), Some("X".into()));
@@ -793,11 +793,11 @@ B = ":append"
     fn key_expansion() {
         let mut d = DataSmart::new();
 
-        d.set_var("TEST${A}", "1");
+        set_var!(&mut d, "TEST${A}", "1");
         assert_eq!(get_var!(&d, "TEST${A}"), Some("1".into()));
 
-        d.set_var("TEST2", "2");
-        d.set_var("A", "2");
+        set_var!(&mut d, "TEST2", "2");
+        set_var!(&mut d, "A", "2");
 
         d.expand_keys().unwrap();
 
@@ -807,20 +807,20 @@ B = ":append"
     // #[test]
     // fn get_var_varflag_operations() {
     //     let mut d = DataSmart::new();
-    //     d.set_var("P", "");
-    //     d.set_var("P:append", "append!");
+    //     set_var!(&mut d, "P", "");
+    //     set_var!(&mut d, "P:append", "append!");
     //     assert!(get_var!(&d, "P:append").is_none());
     // }
 
     #[test_log::test]
     fn test_wat() {
         let mut d = DataSmart::new();
-        d.set_var("P", "");
-        d.set_var("P:a", "append");
-        d.set_var("Q", "base ");
-        d.set_var("Q:${P}", "OK2");
-        d.set_var("Q:append", "me first");
-        d.set_var("OVERRIDES", "a");
+        set_var!(&mut d, "P", "");
+        set_var!(&mut d, "P:a", "append");
+        set_var!(&mut d, "Q", "base ");
+        set_var!(&mut d, "Q:${P}", "OK2");
+        set_var!(&mut d, "Q:append", "me first");
+        set_var!(&mut d, "OVERRIDES", "a");
 
         d.expand_keys().unwrap();
 
@@ -830,7 +830,7 @@ B = ":append"
     #[test]
     fn variable_roots_1() {
         let mut d = DataSmart::new();
-        d.set_var("P:inactive", ":)");
+        set_var!(&mut d, "P:inactive", ":)");
         //dbg!(&d);
         //assert!(get_var!(&d, "P").is_none());
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)");
@@ -839,8 +839,8 @@ B = ":append"
     #[test]
     fn variable_roots_2() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:inactive", ":)");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:inactive", ":)");
         assert_eq!(get_var!(&d, "P").unwrap(), "p");
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)");
     }
@@ -848,10 +848,10 @@ B = ":append"
     #[test]
     fn variable_roots_3() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:t", "t");
-        d.set_var("P:inactive", ":)");
-        d.set_var("OVERRIDES", "t");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:t", "t");
+        set_var!(&mut d, "P:inactive", ":)");
+        set_var!(&mut d, "OVERRIDES", "t");
         assert_eq!(get_var!(&d, "P").unwrap(), "t");
         assert_eq!(get_var!(&d, "P:t").unwrap(), "t");
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)");
@@ -860,11 +860,11 @@ B = ":append"
     #[test]
     fn variable_roots_4() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:t", "t");
-        d.set_var("P:inactive", ":)");
-        d.set_var("P:append", "base");
-        d.set_var("OVERRIDES", "t");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:t", "t");
+        set_var!(&mut d, "P:inactive", ":)");
+        set_var!(&mut d, "P:append", "base");
+        set_var!(&mut d, "OVERRIDES", "t");
 
         assert_eq!(get_var!(&d, "P").unwrap(), "tbase");
 
@@ -876,9 +876,9 @@ B = ":append"
     #[test]
     fn variable_roots_5() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:inactive", ":)");
-        d.set_var("P:inactive:append", "!");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:inactive", ":)");
+        set_var!(&mut d, "P:inactive:append", "!");
 
         assert_eq!(get_var!(&d, "P").unwrap(), "p");
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)!");
@@ -887,10 +887,10 @@ B = ":append"
     #[test]
     fn variable_roots_6() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:inactive", ":)");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:inactive", ":)");
         // this :append only applies when 'inactive' is in override set, which it's not
-        d.set_var("P:append:inactive", "!");
+        set_var!(&mut d, "P:append:inactive", "!");
 
         assert_eq!(get_var!(&d, "P").unwrap(), "p");
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)");
@@ -899,14 +899,14 @@ B = ":append"
     #[test]
     fn variable_roots_7() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:inactive", ":)");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:inactive", ":)");
         // applies if P:inactive is selected as starting value
-        d.set_var("P:inactive:append", "@");
+        set_var!(&mut d, "P:inactive:append", "@");
         // this :append only applies when 'inactive' is in override set, which it's not
-        d.set_var("P:append:inactive", "!");
+        set_var!(&mut d, "P:append:inactive", "!");
         // applies if P:inactive is selected as starting value AND 'inactive' is in override set
-        d.set_var("P:inactive:append:inactive", "?");
+        set_var!(&mut d, "P:inactive:append:inactive", "?");
 
         assert_eq!(get_var!(&d, "P").unwrap(), "p");
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)@");
@@ -915,10 +915,10 @@ B = ":append"
     #[test]
     fn variable_roots_8() {
         let mut d = DataSmart::new();
-        d.set_var("P", "p");
-        d.set_var("P:O", "t");
-        d.set_var("P:O:append", "!");
-        d.set_var("OVERRIDES", "O");
+        set_var!(&mut d, "P", "p");
+        set_var!(&mut d, "P:O", "t");
+        set_var!(&mut d, "P:O:append", "!");
+        set_var!(&mut d, "OVERRIDES", "O");
         //assert_eq!(get_var!(&d, "P").unwrap(), "t!");
         assert!(get_var!(&d, "P:notexist").is_none());
         assert_eq!(get_var!(&d, "P:O").unwrap(), "t!");
@@ -927,9 +927,9 @@ B = ":append"
     #[test]
     fn variable_roots_9() {
         let mut d = DataSmart::new();
-        d.set_var("Q", "q");
-        d.set_var("Q:${IN}", "t");
-        d.set_var("IN", "please");
+        set_var!(&mut d, "Q", "q");
+        set_var!(&mut d, "Q:${IN}", "t");
+        set_var!(&mut d, "IN", "please");
         //assert_eq!(get_var!(&d, "Q").unwrap(), "q");
 
         d.expand_keys().unwrap();
@@ -940,9 +940,9 @@ B = ":append"
     #[test]
     fn variable_roots_10() {
         let mut d = DataSmart::new();
-        d.set_var("Q", "q");
-        d.set_var("Q:a:b", "ab");
-        d.set_var("Q:b:a", "ba");
+        set_var!(&mut d, "Q", "q");
+        set_var!(&mut d, "Q:a:b", "ab");
+        set_var!(&mut d, "Q:b:a", "ba");
         assert_eq!(get_var!(&d, "Q:a:b").unwrap(), "ab");
         assert_eq!(get_var!(&d, "Q:b:a").unwrap(), "ba");
     }

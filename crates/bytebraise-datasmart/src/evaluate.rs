@@ -1,4 +1,5 @@
 use crate::errors::DataSmartResult;
+use crate::macros::set_var;
 use crate::petgraph2::DataSmart;
 use bytebraise_syntax::parser::parse_bitbake_from_str;
 use bytebraise_syntax::syntax::ast::AstToken;
@@ -67,7 +68,7 @@ fn evaluate_assignment_expression(
 
     match expr.op().syntax().kind() {
         SyntaxKind::Equals => {
-            data.set_var(key, assigned_value);
+            set_var!(data, key, assigned_value);
         }
         SyntaxKind::WeakEquals => data.weak_default_var(key, assigned_value),
         SyntaxKind::DefaultEquals => data.default_var(key, assigned_value),
