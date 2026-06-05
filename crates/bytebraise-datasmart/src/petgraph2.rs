@@ -263,7 +263,8 @@ impl DataSmart {
         set_var_ex!(self, var, value, operator = NormalOperator::Default);
     }
 
-    pub(crate) fn set_var_ex<T: Into<String>, S: Into<String>>(
+    #[tracing::instrument(skip(self), ret)]
+    pub(crate) fn set_var_ex<T: Into<String> + Debug, S: Into<String> + Debug>(
         &mut self,
         var: T,
         value: S,
@@ -272,12 +273,8 @@ impl DataSmart {
     ) -> Option<NodeIndex<DefaultIx>> {
         let var = var.into();
 
-        //dbg!(&var);
         let stmt_node = parse_statement(&var, normal_operator, value.into())?;
         let base = stmt_node.lhs.var_base.clone();
-
-        // TODO: if parsing, and no keyword given, then wipe away removes, prepends, and appends
-        //  Also need to do something with overrides - not sure what though (set setVar())
 
         let resolved_op = stmt_node.resolved_operator();
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(stmt_node));
@@ -289,6 +286,12 @@ impl DataSmart {
             .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(base)));
 
         let var_data = self.ds.node_weight_mut(*var_entry).unwrap().variable_mut();
+
+        // If not parsing, wipe away overrides
+        if !parsing {
+            // TODO: not sure if it's this easy...
+            var_data.operations.clear();
+        }
 
         var_data.operations.push(VariableOperation {
             op_type: resolved_op,
@@ -484,7 +487,6 @@ impl DataSmart {
 
         // Get unexpanded value of the full old var, and assign it to new var
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
-            // TODO: parsing mode?
             set_var!(self, new, old_val, parsing = true);
         }
 

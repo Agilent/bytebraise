@@ -1,6 +1,7 @@
 use crate::errors::DataSmartResult;
-use crate::macros::set_var;
+use crate::macros::{set_var, set_var_ex};
 use crate::petgraph2::DataSmart;
+use crate::variable_operation::NormalOperator;
 use bytebraise_syntax::parser::parse_bitbake_from_str;
 use bytebraise_syntax::syntax::ast::AstToken;
 use bytebraise_syntax::syntax::ast::nodes::{Assignment, Root, RootItem};
@@ -68,14 +69,62 @@ fn evaluate_assignment_expression(
 
     match expr.op().syntax().kind() {
         SyntaxKind::Equals => {
-            set_var!(data, key, assigned_value);
+            set_var!(data, key, assigned_value, parsing = true);
         }
-        SyntaxKind::WeakEquals => data.weak_default_var(key, assigned_value),
-        SyntaxKind::DefaultEquals => data.default_var(key, assigned_value),
-        SyntaxKind::EqualsDot => data.equals_dot_var(key, assigned_value),
-        SyntaxKind::DotEquals => data.dot_equals_var(key, assigned_value),
-        SyntaxKind::PlusEquals => data.plus_equals_var(key, assigned_value),
-        SyntaxKind::EqualsPlus => data.equals_plus_var(key, assigned_value),
+        SyntaxKind::WeakEquals => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::WeakDefault,
+                parsing = true
+            );
+        }
+        SyntaxKind::DefaultEquals => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::Default,
+                parsing = true
+            );
+        }
+        SyntaxKind::EqualsDot => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::EqualDot,
+                parsing = true
+            );
+        }
+        SyntaxKind::DotEquals => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::DotEqual,
+                parsing = true
+            );
+        }
+        SyntaxKind::PlusEquals => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::PlusEqual,
+                parsing = true
+            );
+        }
+        SyntaxKind::EqualsPlus => {
+            set_var_ex!(
+                data,
+                key,
+                assigned_value,
+                operator = NormalOperator::EqualPlus,
+                parsing = true
+            );
+        }
         SyntaxKind::ColonEquals => {
             unimplemented!("TODO :=");
             //let current_value = data.get_var(&key);

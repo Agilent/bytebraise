@@ -290,8 +290,6 @@ OVERRIDES = "a"
 
     d.expand_keys().unwrap();
 
-    d.dump();
-
     assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
 }
 

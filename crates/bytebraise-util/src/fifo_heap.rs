@@ -45,6 +45,11 @@ impl<T: Ord> FifoHeap<T> {
     {
         self.heap.retain(|v| f(&v.0));
     }
+
+    pub fn clear(&mut self) {
+        self.heap.clear();
+        self.seq = usize::MIN;
+    }
 }
 
 impl<T: Ord> FifoHeap<T> {
