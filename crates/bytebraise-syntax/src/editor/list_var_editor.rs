@@ -35,7 +35,7 @@ impl ListVarEditor {
 
         let mut source = String::new();
         File::open(path)
-            .with_context(|| format!("failed to read {:?}", &path))?
+            .with_context(|| format!("failed to read {:?}", path))?
             .read_to_string(&mut source)?;
 
         let root = parse_bitbake_from_str(&source).clone_for_update();

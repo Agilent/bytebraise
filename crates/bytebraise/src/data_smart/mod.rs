@@ -691,10 +691,10 @@ impl DataSmartInner {
             .with_context(|| format!("rename_var: {var}"))?;
         if let Some(val) = &val {
             // TODO var history
-            println!("set {}", &new_key);
+            println!("set {}", new_key);
             self.set_var(new_key.clone(), val.clone(), true)?;
         } else {
-            println!("no value for var {}", &var);
+            println!("no value for var {}", var);
         }
 
         for i in &[APPEND_FLAG, PREPEND_FLAG, REMOVE_FLAG] {

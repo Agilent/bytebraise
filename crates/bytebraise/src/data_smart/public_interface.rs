@@ -88,14 +88,14 @@ impl DataSmart {
     pub fn expand(&self, s: &str) -> DataSmartResult<Option<String>> {
         RefCell::borrow(&self.data)
             .expand(s, Option::<String>::None)
-            .with_context(|| format!("expand: {}", &s))
+            .with_context(|| format!("expand: {}", s))
     }
 
     pub fn expand_varref<V: AsRef<str>>(&self, variable: V) -> DataSmartResult<()> {
         let variable = variable.as_ref();
         RefCell::borrow(&self.data)
             .expand_varref(variable)
-            .with_context(|| format!("expand_varref: {}", &variable))
+            .with_context(|| format!("expand_varref: {}", variable))
     }
 
     pub fn expand_with_refs<T: Into<String>, V: Into<String>>(

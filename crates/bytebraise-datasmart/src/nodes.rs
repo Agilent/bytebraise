@@ -40,7 +40,7 @@ impl Display for GraphItem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self {
             GraphItem::Variable(var) => f.write_str(&var.name),
-            GraphItem::StmtNode(stmt) => f.write_str(&format!("{:#?}", &stmt)),
+            GraphItem::StmtNode(stmt) => f.write_str(&format!("{:#?}", stmt)),
         }
     }
 }

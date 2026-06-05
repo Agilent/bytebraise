@@ -1,4 +1,3 @@
-use crate::evaluate::eval;
 
 #[test]
 fn override_operator_filter_casing() {

@@ -9,7 +9,7 @@ pub fn eval<D: AsRef<str>>(data: D) -> DataSmart {
     let data = data.as_ref();
     let parsed = parse_bitbake_from_str(data);
 
-    println!("{:#?}", &parsed);
+    println!("{:#?}", parsed);
 
     let mut d = DataSmart::new();
     parsed.evaluate(&mut d).unwrap();

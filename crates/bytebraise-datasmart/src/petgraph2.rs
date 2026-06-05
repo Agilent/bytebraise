@@ -42,7 +42,7 @@ use petgraph::data::DataMap;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
-use petgraph::stable_graph::{DefaultIx, EdgeIndex};
+use petgraph::stable_graph::DefaultIx;
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::borrow::Cow;
@@ -182,7 +182,7 @@ impl DataSmart {
     pub fn dump(&self) {
         let mut f = File::create("/tmp/example1.dot").unwrap();
         let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeNoLabel]));
-        f.write_all(&output.as_bytes()).unwrap();
+        f.write_all(output.as_bytes()).unwrap();
     }
 
     fn apply_removes(&self, input: &str, removes: &HashSet<String>) -> String {
@@ -271,7 +271,7 @@ impl DataSmart {
             idx: stmt_idx,
         });
 
-        let e = self.ds.add_edge(*var_entry, stmt_idx, 0);
+        let _e = self.ds.add_edge(*var_entry, stmt_idx, 0);
 
         Some(*var_entry)
     }
@@ -405,7 +405,7 @@ impl DataSmart {
             let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
             var_node.operations.retain(|op| {
                 if stmts.contains(&op.idx) {
-                    eprintln!("delete {:?}", &op.idx);
+                    eprintln!("delete {:?}", op.idx);
                 }
                 !stmts.contains(&op.idx)
             });
@@ -923,7 +923,7 @@ impl DataSmart {
 
                 let scope = stmt_node.lhs.override_scope();
                 let mut parts = vec![var.0.clone()];
-                parts.extend(scope.into_iter());
+                parts.extend(scope);
                 ret.insert(parts.join(":"));
 
                 // Lop off parts of the scope until we find one that isn't active

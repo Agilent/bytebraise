@@ -174,14 +174,14 @@ pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
         // the original bitbake __setvar_regexp__ regex).
         if remainder.all(|part| OVERRIDE_STR_REGEX.is_match(part)) {
             // Consume the scope
-            let mut scope = parts
+            let scope = parts
                 .by_ref()
                 .take(operator)
                 .map(String::from)
                 .collect_vec();
 
             // Consume operator
-            let mut operator = parts.next().unwrap();
+            let operator = parts.next().unwrap();
 
             // Consume filter
             let filter = parts.map(String::from).collect();

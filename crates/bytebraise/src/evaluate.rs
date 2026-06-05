@@ -214,7 +214,7 @@ fn evaluate_assignment_expression(
                     let e = data.create_copy();
                     new_value = e
                         .expand_with_varname(assigned_value.as_str(), format!("{key}[:=]"))
-                        .with_context(|| format!("error expanding {}", &assigned_value))?
+                        .with_context(|| format!("error expanding {}", assigned_value))?
                         .unwrap()
                         .into();
                 }
@@ -280,7 +280,7 @@ fn include_single_file<F: AsRef<Path>>(data: &DataSmart, file_name: F) -> DataSm
     }
 
     parse_config_file(&file_name, data)
-        .with_context(|| format!("failure including file {:?}", &file_name))?;
+        .with_context(|| format!("failure including file {:?}", file_name))?;
 
     Ok(())
 }
@@ -297,7 +297,7 @@ pub fn parse_config_file<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartRes
         // TODO avoid clone
         let newfn = newfn
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("file {:?} not found in {}", &newfn, &bbpath))?;
+            .ok_or_else(|| anyhow::anyhow!("file {:?} not found in {}", newfn, bbpath))?;
         file = newfn;
     }
 
@@ -305,11 +305,11 @@ pub fn parse_config_file<F: AsRef<Path>>(file: F, d: &DataSmart) -> DataSmartRes
         //anyhow::bail!("expected .conf file extension; file is: {:?}", &file);
     }
 
-    println!("file: {:?}", &file);
+    println!("file: {:?}", file);
     File::open(&file)?.read_to_string(&mut source)?;
     let res = parse_bitbake_from_str(&source);
     res.evaluate(d)
-        .with_context(|| format!("failure to evaluate metadata for {:?}", &file))?;
+        .with_context(|| format!("failure to evaluate metadata for {:?}", file))?;
     Ok(())
 }
 
