@@ -378,8 +378,7 @@ impl DataSmart {
                         set.visited.remove(referenced_var);
                     }
 
-                    Ok(self
-                        .get_var(referenced_var, false, true)
+                    Ok(get_var!(self, referenced_var)
                         .unwrap_or(match_str.to_string()))
                 },
             )?;
@@ -629,7 +628,7 @@ impl DataSmart {
             for _ in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
                 let s = split_filter_empty(
-                    &self.get_var("OVERRIDES", false, true).unwrap_or_default(),
+                    &get_var!(self, "OVERRIDES").unwrap_or_default(),
                     ":",
                 )
                 .map(String::from)
@@ -639,7 +638,7 @@ impl DataSmart {
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
                 let s2 = split_filter_empty(
-                    &self.get_var("OVERRIDES", false, true).unwrap_or_default(),
+                    &get_var!(self, "OVERRIDES").unwrap_or_default(),
                     ":",
                 )
                 .map(String::from)
@@ -662,6 +661,7 @@ impl DataSmart {
         var: S,
         parsing: bool,
         expand: bool,
+        no_weak_default: bool,
     ) -> Option<String> {
         let parsed = parse_variable(var);
 
