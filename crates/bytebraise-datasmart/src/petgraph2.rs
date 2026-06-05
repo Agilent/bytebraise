@@ -673,9 +673,6 @@ impl DataSmart {
 
         // Lookup the variable, otherwise return None
         let var_entry = self.vars.get(&parsed.var_base)?;
-        // TODO: don't so this, just add 'override_scope' method which returns the Vec
-        let var_suffix = split_overrides(parsed.override_scope_string());
-
         let w = self.ds.node_weight(*var_entry).unwrap();
         let var_data = w.variable();
 
@@ -699,6 +696,7 @@ impl DataSmart {
 
         // The union of active overrides with whatever overrides were provided in the
         // direct-variant lookup. This is only used for override-scoped operators.
+        let var_suffix = parsed.override_scope();
         let override_selection_context: Cow<IndexSet<String>> = match var_suffix.is_empty() {
             false => {
                 // TODO: revisit: are we sure the new overrides should be inserted into the beginning?
