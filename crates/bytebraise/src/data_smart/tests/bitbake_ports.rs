@@ -17,9 +17,8 @@ use crate::ported_datasmart_test;
 // DataExpansions
 #[cfg(test)]
 mod data_expansions {
-    use std::assert_matches::assert_matches;
-
     use DataSmartError::RecursiveReferenceError;
+    use std::assert_matches;
 
     use super::*;
 

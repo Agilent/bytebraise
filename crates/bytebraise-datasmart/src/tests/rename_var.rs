@@ -64,7 +64,6 @@ TEST:a = "3"
     assert_eq!(get_var!(&d, "WAT:a").unwrap(), "3");
 }
 
-
 #[test_log::test]
 fn basic_4() {
     let mut d = eval(
