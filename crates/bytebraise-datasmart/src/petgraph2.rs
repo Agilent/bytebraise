@@ -263,7 +263,7 @@ impl DataSmart {
         set_var_ex!(self, var, value, operator = NormalOperator::Default);
     }
 
-    pub fn set_var_ex<T: Into<String>, S: Into<String>>(
+    pub(crate) fn set_var_ex<T: Into<String>, S: Into<String>>(
         &mut self,
         var: T,
         value: S,
