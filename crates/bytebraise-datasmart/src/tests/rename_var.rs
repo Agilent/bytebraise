@@ -50,6 +50,39 @@ TEST:a = "3"
     eprintln!();
     d.dump();
 
+    let p = d.get_all_keys();
+    assert_eq!(p, vec!["WAT:a", "WAT:a:b", "WAT:a:b:c"]);
+
+    assert!(get_var!(&d, "TEST").is_none());
+    assert!(get_var!(&d, "TEST:a:b:c").is_none());
+    assert!(get_var!(&d, "TEST:a:b").is_none());
+    assert!(get_var!(&d, "TEST:a").is_none());
+    assert!(get_var!(&d, "WAT").is_none());
+
+    assert_eq!(get_var!(&d, "WAT:a:b:c").unwrap(), "1");
+    assert_eq!(get_var!(&d, "WAT:a:b").unwrap(), "2");
+    assert_eq!(get_var!(&d, "WAT:a").unwrap(), "3");
+}
+
+
+#[test_log::test]
+fn basic_4() {
+    let mut d = eval(
+        r#"
+TEST:a:b:c = "1"
+TEST:a:b = "2"
+TEST:a = "3"
+OVERRIDES = "a:b"
+    "#,
+    );
+
+    eprintln!();
+    d.rename_var("TEST", "WAT").unwrap();
+    eprintln!();
+
+    let p = d.get_all_keys();
+    assert_eq!(p, vec!["WAT:a", "WAT:a:b", "WAT:a:b:c"]);
+
     assert!(get_var!(&d, "TEST").is_none());
     assert!(get_var!(&d, "TEST:a:b:c").is_none());
     assert!(get_var!(&d, "TEST:a:b").is_none());
@@ -62,7 +95,7 @@ TEST:a = "3"
 }
 
 #[test_log::test]
-fn basic_4() {
+fn basic_5() {
     let mut d = eval(
         r#"
 TEST:a:b:c = "1"
@@ -79,7 +112,7 @@ TEST:a = "3"
 }
 
 #[test_log::test]
-fn basic_5() {
+fn basic_6() {
     let mut d = eval(
         r#"
 TES${TT} = "WAT"

@@ -1,9 +1,5 @@
 use crate::evaluate::eval;
 
-// TODO: bitbake stores TEST:${B} as its own variable, whereas we store TEST with a ${B} operation.
-//   Do we need to replicate bitbake's behavior internally?
-//
-
 #[test]
 fn basic_keys_1() {
     let mut d = eval(
