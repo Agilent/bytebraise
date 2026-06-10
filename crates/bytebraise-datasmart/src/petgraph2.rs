@@ -464,8 +464,6 @@ impl DataSmart {
         old: A,
         new: B,
     ) -> DataSmartResult<()> {
-        dbg!(&self.vars);
-
         let old = old.as_ref();
         let new = new.as_ref();
 
@@ -476,51 +474,42 @@ impl DataSmart {
         let old_parsed = parse_variable(old);
         let new_parsed = parse_variable(new);
 
+        let old_base = &old_parsed.var_base;
         let new_base = &new_parsed.var_base;
 
-        // Extract the override match targets (e.g., ["a"])
         let old_target_scope = old_parsed.override_scope();
-        let new_target_scope = new_parsed.override_scope();
 
-        // Get unexpanded value of the full old var, and assign it to new var
-        if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
-            dbg!(&old_val);
-            set_var!(self, new, old_val, parsing = true);
-        }
+        let old_var_index = match self.vars.get(old_base) {
+            Some(&idx) => idx,
+            None => return Ok(()),
+        };
 
-        let old_var_index = *self.vars.get(&old_parsed.var_base).unwrap();
-        // --- PHASE 1: Collect Statements to Move (Immutable Read) ---
-        // Tracks: (Statement Node Index, The Edge Metadata to preserve order/operators)
-        let mut statements_to_move: Vec<(NodeIndex, EdgeOperation)> = Vec::new();
+        // --- PHASE 1: Collect and Explicitly Isolate Edge IDs (Immutable Read) ---
+        // Change tracking to hold the physical EdgeIndex so we can delete it directly
+        let mut edges_to_move = Vec::new();
 
-        let mut walker = self
-            .ds
-            .neighbors_directed(old_var_index, petgraph::Direction::Outgoing)
-            .detach();
+        let mut walker = self.ds.neighbors_directed(old_var_index, Direction::Outgoing).detach();
         while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
-                // Extract the scope vectors depending on Assignment vs OverrideOperation
+
                 let stmt_scope = match &stmt.lhs.kind {
-                    Assignment { scope } => scope,
-                    OverrideOperation { scope, .. } => scope,
+                    VariableExpressionKind::Assignment { scope } => scope,
+                    VariableExpressionKind::OverrideOperation { scope, .. } => scope,
                 };
 
-                // Check if the statement's scope matches or extends our target rename path
-                // e.g., does ["a", "b"] start with ["a"]?
                 if stmt_scope.starts_with(&old_target_scope) {
                     let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
-                    statements_to_move.push((target_node_idx, op_metadata));
+                    // Store edge index, statement index, and metadata
+                    edges_to_move.push((edge_idx, target_node_idx, op_metadata));
                 }
             }
         }
 
-        // If no statements matched the criteria, we can exit early
-        if statements_to_move.is_empty() {
+        if edges_to_move.is_empty() {
             return Ok(());
         }
 
-        // --- PHASE 2: Ensure Target Root Exists (Mutable Setup) ---
-        // If root variable "V" doesn't exist yet in the graph, initialize it now
+        // --- PHASE 2: Ensure Target Root Exists ---
         let new_var_index = match self.vars.get(new_base) {
             Some(&idx) => idx,
             None => {
@@ -534,43 +523,70 @@ impl DataSmart {
             }
         };
 
-        // --- PHASE 3: Mutate Statement Internals & Re-Scope ---
-        for (stmt_idx, _) in &statements_to_move {
+        // --- PHASE 3: Mutate Statement Internals & Re-Shape ---
+        for (_, stmt_idx, _) in &edges_to_move {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
-                // 1. Change the base root name (e.g., "A" -> "V")
-                stmt.lhs.var_base = new_base.clone();
+                let stmt_scope_len = match &stmt.lhs.kind {
+                    VariableExpressionKind::Assignment { scope } => scope.len(),
+                    VariableExpressionKind::OverrideOperation { scope, .. } => scope.len(),
+                };
 
-                // 2. Adjust internal scopes if the renaming changed the scope depth/names
-                // e.g., if renaming "A:a" to "V:x", ["a", "b"] needs to become ["x", "b"]
-                if old_target_scope != new_target_scope {
-                    let stmt_scope = match &mut stmt.lhs.kind {
+                let trailing_scope_count = stmt_scope_len - old_target_scope.len();
+                let mut updated_lhs = new_parsed.clone();
+
+                if trailing_scope_count > 0 {
+                    let stmt_scope = match &stmt.lhs.kind {
                         VariableExpressionKind::Assignment { scope } => scope,
                         VariableExpressionKind::OverrideOperation { scope, .. } => scope,
                     };
 
-                    // Strip the old prefix and splice the new prefix on
-                    let remaining_scope = stmt_scope.split_off(old_target_scope.len());
-                    let mut updated_scope = new_target_scope.clone();
-                    updated_scope.extend(remaining_scope);
-                    *stmt_scope = updated_scope;
+                    let trailing_overrides = &stmt_scope[old_target_scope.len()..];
+
+                    match &mut updated_lhs.kind {
+                        VariableExpressionKind::Assignment { scope } => {
+                            scope.extend(trailing_overrides.iter().cloned());
+                        }
+                        VariableExpressionKind::OverrideOperation { scope, .. } => {
+                            scope.extend(trailing_overrides.iter().cloned());
+                        }
+                    }
                 }
+
+                stmt.lhs = updated_lhs;
             }
         }
 
-        // --- PHASE 4: Graph Topology Updates (Shift Edges) ---
-        for (stmt_idx, op_metadata) in statements_to_move {
-            // Disconnect from the old variable node ("A")
-            if let Some(edge) = self.ds.find_edge(old_var_index, stmt_idx) {
-                self.ds.remove_edge(edge);
-            }
+        // --- PHASE 4: Graph Topology Updates ---
+        for (edge_idx, stmt_idx, mut op_metadata) in edges_to_move {
+            // 1. Remove the old edge first
+            self.ds.remove_edge(edge_idx);
 
-            // Connect to the new variable node ("V")
+            // 2. CRITICAL: Update the sequence ID to the current "now".
+            //    This ensures the renamed operation applies AFTER all existing static metadata.
+            op_metadata.sequence_id = self.statement_id;
+            self.statement_id += 1;
+
+            // 3. Connect to the new variable node
             self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
         }
+
+        // --- PHASE 5: Clean Up Residual Variable Nodes ---
+        // If our old root ("TEST${B}") now has zero remaining outgoing statements,
+        // clear it out of our tracking variables entirely.
+        let remaining_edges = self.ds.neighbors_directed(old_var_index, petgraph::Direction::Outgoing).count();
+        if remaining_edges == 0 {
+            self.vars.remove(old_base);
+            self.ds.remove_node(old_var_index);
+        }
+
+        self.del_var(old)?;
+
         dbg!(&self.vars);
         dbg!(&self.ds);
+
         Ok(())
     }
+
 
     /// There are three kinds of unexpanded keys we need to handle.
     ///

@@ -42,7 +42,7 @@ impl StatementNode2 {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub(crate) struct VariableExpression {
     pub(crate) var_base: String,
     pub(crate) kind: VariableExpressionKind,
@@ -58,7 +58,7 @@ impl VariableExpression {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub(crate) enum VariableExpressionKind {
     /// e.g. B:scope:append:filter = "V"
     OverrideOperation {
