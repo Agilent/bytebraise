@@ -320,6 +320,7 @@ OVERRIDES = "a:b"
             "#,
         );
 
+        // d.dump();
         d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some("firstOPwhy?".into()));

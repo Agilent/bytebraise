@@ -53,10 +53,6 @@ impl VariableExpression {
         self.kind.override_string()
     }
 
-    pub(crate) fn override_scope_string(&self) -> String {
-        self.kind.override_scope().join(":")
-    }
-
     pub(crate) fn override_scope(&self) -> Vec<String> {
         self.kind.override_scope()
     }
@@ -64,7 +60,7 @@ impl VariableExpression {
 
 #[derive(Eq, PartialEq, Debug)]
 pub(crate) enum VariableExpressionKind {
-    /// e.g. B:append:a = "V"
+    /// e.g. B:scope:append:filter = "V"
     OverrideOperation {
         scope: Vec<String>,
         /// The override operator embedded in the variable expression - different from the
@@ -75,7 +71,7 @@ pub(crate) enum VariableExpressionKind {
         filter: IndexSet<String>,
     },
     /// e.g. B = "V"
-    ///      B:a = "V"
+    ///      B:scope = "V"
     // TODO: rename to normal override or something? It is also an override
     Assignment {
         // Sequence of override strings, conforming to [a-z0-9]+

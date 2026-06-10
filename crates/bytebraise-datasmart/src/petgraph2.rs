@@ -50,7 +50,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::Write;
-use std::ops::Deref;
+use std::ops::{Deref, IndexMut};
+use std::path::Path;
 
 // TODO: check for latest version in upstream bitbake
 static VAR_EXPANSION_REGEX: Lazy<Regex> =
@@ -178,8 +179,8 @@ impl DataSmart {
         }
     }
 
-    pub fn dump(&self) {
-        let mut f = File::create("/tmp/example1.dot").unwrap();
+    pub fn dump<P: AsRef<Path>>(&self, path: P) {
+        let mut f = File::create(path).unwrap();
         let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeNoLabel]));
         f.write_all(output.as_bytes()).unwrap();
     }
@@ -378,8 +379,7 @@ impl DataSmart {
                         set.visited.remove(referenced_var);
                     }
 
-                    Ok(get_var!(self, referenced_var)
-                        .unwrap_or(match_str.to_string()))
+                    Ok(get_var!(self, referenced_var).unwrap_or(match_str.to_string()))
                 },
             )?;
 
@@ -445,34 +445,14 @@ impl DataSmart {
         Ok(())
     }
 
-    /// expand_keys() has to handle several different kinds of situations. They all play out a bit
-    /// differently.
-    ///
-    /// TEST = "base"
-    /// TES${Q}:append = "a"
-    /// TES${Q}:append = "b"
-    /// Q = "T"
-    /// P = "T:append"
-    ///
-    /// todolist: {'TES${Q}': 'TEST', 'TES${P}': 'TEST:append'}
-    /// renameVar(TES${P}, TEST:append)
-    /// Variable key TES${Q} (ab) replaces original key TEST (baseQ).
-    /// renameVar(TES${Q}, TEST)
-
-    /// TESQ:A = "1"
-    /// TESQ:${A} = "a"
-    /// A = "A"
-    ///
-    /// todolist: {'TESQ:${A}': 'TESQ:A'}
-    /// Variable key TESQ:${A} (a) replaces original key TESQ:A (1).
-    /// renameVar(TESQ:${A}, TESQ:A)
-
     #[tracing::instrument(skip(self), ret)]
     pub fn rename_var<A: AsRef<str> + Debug, B: AsRef<str> + Debug>(
         &mut self,
         old: A,
         new: B,
     ) -> DataSmartResult<()> {
+        dbg!(&self.vars);
+
         let old = old.as_ref();
         let new = new.as_ref();
 
@@ -480,62 +460,65 @@ impl DataSmart {
             bail!("Calling renameVar with equivalent keys {old} is invalid");
         }
 
-        let old_base_var = old.split_once(':').map_or(old, |p| p.0);
-        let new_base_var = new.split_once(':').map_or(new, |p| p.0);
-        tracing::info!("{:?} {:?}", old, new);
+        let old_parsed = parse_variable(old);
+        let new_parsed = parse_variable(new);
 
         // Get unexpanded value of the full old var, and assign it to new var
+        let mut new_var_index = None;
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
-            set_var!(self, new, old_val, parsing = true);
+            new_var_index = set_var!(self, new, old_val, parsing = true);
         }
 
-        // Next, transplant :appends, :prepends, and :removes
-        let new_var_index = *self
-            .vars
-            .entry(new_base_var.to_string())
-            .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(new_base_var)));
+        let new_var_index = new_var_index.unwrap();
 
-        let old_var_index = *self.vars.get(old_base_var).unwrap();
+        let old_var_index = *self.vars.get(&old_parsed.var_base).unwrap();
 
-        let old_var_node = self.ds.node_weight(old_var_index).unwrap().variable();
+        let scope_set: IndexSet<String> = old_parsed.override_scope().iter().cloned().collect();
+        let mut ops_to_move = Vec::new();
 
-        // Worked example:
-        //
-        // TEST = "b"
-        // TEST:${A}:append = "2"
-        // A = "a"
-        // OVERRIDES = "a"
-        //
-        // d.expand_keys();
-        //   => rename_var("TEST:${A}", "TEST:a");
-        //   =>
+        // We use an immutable borrow of self.ds to check conditions
+        if let Some(GraphItem::Variable(old_var_node)) = self.ds.node_weight(old_var_index) {
+            for op in old_var_node.operations.iter() {
+                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(op.idx) {
+                    let stmt_scope_set: IndexSet<String> =
+                        stmt.lhs.override_scope().iter().cloned().collect();
 
-        for op in old_var_node.operations.clone().into_iter() {
-            let op_data = self.ds.node_weight_mut(op.idx).unwrap();
-            if op.op_type.is_override_operator() {
-                //op_data.statement_mut().override_str = Some("a".to_string());
-                // match &mut op_data.statement_mut().kind {
-                //     StatementKind::Operation { scope, .. } => {
-                //         scope.clear();
-                //         //scope.push("a".to_string());
-                //     }
-                //     StatementKind::PureOverride { .. } => {}
-                //     StatementKind::Unconditional => {}
-                // }
+                    if scope_set.is_subset(&stmt_scope_set) {
+                        // Store the operation descriptor for the mutation phase
+                        ops_to_move.push(*op);
+                    }
+                }
+            }
+        }
 
-                self.ds.add_edge(new_var_index, op.idx, 1);
-                self.ds
-                    .node_weight_mut(new_var_index)
-                    .unwrap()
-                    .variable_mut()
-                    .operations
-                    .push(op);
-            } else {
-                dbg!(&op_data);
+        for op in &ops_to_move {
+            // Update the statement node data
+            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(op.idx) {
+                stmt.lhs.var_base = new_parsed.var_base.clone();
+            }
+
+            // Update graph edges
+            if let Some(edge) = self.ds.find_edge(old_var_index, op.idx) {
+                self.ds.remove_edge(edge);
+            }
+            self.ds.add_edge(new_var_index, op.idx, 1);
+        }
+
+        // Remove the operations from the old variable
+        if let Some(GraphItem::Variable(old_var_node)) = self.ds.node_weight_mut(old_var_index) {
+            old_var_node
+                .operations
+                .retain(|op| !ops_to_move.contains(op));
+        }
+
+        if let Some(GraphItem::Variable(new_var_node)) = self.ds.node_weight_mut(new_var_index) {
+            for op in ops_to_move {
+                new_var_node.operations.push(op);
             }
         }
 
         self.del_var(old)?;
+        dbg!(&self.vars);
 
         Ok(())
     }
@@ -602,7 +585,9 @@ impl DataSmart {
         }
 
         let ret = todolist.keys().cloned().sorted().collect_vec();
+        dbg!(&ret);
         for o in todolist.into_iter() {
+            eprintln!("rename {} to {}", o.0, o.1);
             self.rename_var(o.0, o.1)?;
         }
 
@@ -627,22 +612,16 @@ impl DataSmart {
 
             for _ in 0..5 {
                 //eprintln!("{}+ override iteration {}", " ".repeat(level), i);
-                let s = split_filter_empty(
-                    &get_var!(self, "OVERRIDES").unwrap_or_default(),
-                    ":",
-                )
-                .map(String::from)
-                .collect::<IndexSet<String>>();
+                let s = split_filter_empty(&get_var!(self, "OVERRIDES").unwrap_or_default(), ":")
+                    .map(String::from)
+                    .collect::<IndexSet<String>>();
 
                 //eprintln!("{} set overides = {:?}", " ".repeat(level), s);
                 *RefCell::borrow_mut(&self.active_overrides) = Some(s);
 
-                let s2 = split_filter_empty(
-                    &get_var!(self, "OVERRIDES").unwrap_or_default(),
-                    ":",
-                )
-                .map(String::from)
-                .collect::<IndexSet<String>>();
+                let s2 = split_filter_empty(&get_var!(self, "OVERRIDES").unwrap_or_default(), ":")
+                    .map(String::from)
+                    .collect::<IndexSet<String>>();
 
                 if *RefCell::borrow(&self.active_overrides) == Some(s2.clone()) {
                     return Ok(());
@@ -673,8 +652,7 @@ impl DataSmart {
 
         // Lookup the variable, otherwise return None
         let var_entry = self.vars.get(&parsed.var_base)?;
-        let w = self.ds.node_weight(*var_entry).unwrap();
-        let var_data = w.variable();
+        let var_data = self.ds.node_weight(*var_entry).unwrap().variable();
 
         // // TODO: return directly from `override_state` for OVERRIDES?
         // if var != "OVERRIDES" {
@@ -709,9 +687,6 @@ impl DataSmart {
             }
             true => override_state.clone(),
         };
-
-        //dbg!(&var);
-        //dbg!(&self);
 
         // Calculate override scores for operations
         let mut resolved_variable_operations: FifoHeap<ScoredOperation> = var_data
@@ -942,9 +917,10 @@ impl DataSmart {
         for var in &self.vars {
             // Iterate over statements
             let var_node = self.ds.node_weight(*var.1).unwrap().variable();
+            dbg!(var_node);
             for stmt in var_node.operations.iter() {
                 let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
-                dbg!(stmt_node);
+                // dbg!(stmt_node);
 
                 let scope = stmt_node.lhs.override_scope();
                 let mut parts = vec![var.0.clone()];

@@ -45,10 +45,9 @@ TEST:a = "3"
     "#,
     );
 
-    eprintln!();
-    d.rename_var("TEST", "WAT").unwrap();
-    eprintln!();
-    d.dump();
+    d.dump("/tmp/before.dot");
+    d.rename_var("TEST:a", "WAT:a").unwrap();
+    d.dump("/tmp/after.dot");
 
     let p = d.get_all_keys();
     assert_eq!(p, vec!["WAT:a", "WAT:a:b", "WAT:a:b:c"]);
@@ -322,7 +321,7 @@ OVERRIDES = "a"
     );
 
     d.expand_keys().unwrap();
-    d.dump();
+    //d.dump();
 
     assert_eq!(get_var!(&d, "TEST:q").unwrap(), "P");
     panic!();

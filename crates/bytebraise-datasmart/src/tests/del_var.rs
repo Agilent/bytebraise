@@ -105,7 +105,7 @@ TEST:${T} = "2"
 "#,
     );
 
-    d.dump();
+    //d.dump();
 
     d.del_var("TEST").unwrap();
 
