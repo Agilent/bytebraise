@@ -476,7 +476,6 @@ impl DataSmart {
         let old_parsed = parse_variable(old);
         let new_parsed = parse_variable(new);
 
-        let old_base = &old_parsed.var_base;
         let new_base = &new_parsed.var_base;
 
         // Extract the override match targets (e.g., ["a"])
@@ -484,12 +483,10 @@ impl DataSmart {
         let new_target_scope = new_parsed.override_scope();
 
         // Get unexpanded value of the full old var, and assign it to new var
-        let mut new_var_index = None;
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
-            new_var_index = set_var!(self, new, old_val, parsing = true);
+            dbg!(&old_val);
+            set_var!(self, new, old_val, parsing = true);
         }
-
-        let new_var_index = new_var_index.unwrap();
 
         let old_var_index = *self.vars.get(&old_parsed.var_base).unwrap();
         // --- PHASE 1: Collect Statements to Move (Immutable Read) ---
@@ -504,8 +501,8 @@ impl DataSmart {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
                 // Extract the scope vectors depending on Assignment vs OverrideOperation
                 let stmt_scope = match &stmt.lhs.kind {
-                    VariableExpressionKind::Assignment { scope } => scope,
-                    VariableExpressionKind::OverrideOperation { scope, .. } => scope,
+                    Assignment { scope } => scope,
+                    OverrideOperation { scope, .. } => scope,
                 };
 
                 // Check if the statement's scope matches or extends our target rename path
@@ -570,7 +567,8 @@ impl DataSmart {
             // Connect to the new variable node ("V")
             self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
         }
-
+        dbg!(&self.vars);
+        dbg!(&self.ds);
         Ok(())
     }
 
