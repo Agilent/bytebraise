@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::ops::{Bound, RangeBounds, RangeFull};
 
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {
@@ -49,6 +50,19 @@ impl<T: Ord> FifoHeap<T> {
     pub fn clear(&mut self) {
         self.heap.clear();
         self.seq = usize::MIN;
+    }
+
+    pub fn extract_if<F>(&mut self, mut pred: F) -> impl Iterator<Item = T>
+    where
+        F: FnMut(&T) -> bool,
+    {
+        let inner = self
+            .heap
+            .extract_if((Bound::Unbounded, Bound::Unbounded), move |(val, _)| {
+                pred(val)
+            });
+
+        ExtractIf { inner }
     }
 }
 
@@ -109,5 +123,34 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|v| &v.0)
+    }
+}
+
+pub struct ExtractIf<'a, T, F>
+where
+    T: Ord,
+    F: FnMut(&(T, usize)) -> bool,
+{
+    inner: std::collections::btree_set::ExtractIf<
+        'a,
+        (T, usize),
+        (Bound<(T, usize)>, Bound<(T, usize)>),
+        F,
+    >,
+}
+
+impl<'a, T, F> Iterator for ExtractIf<'a, T, F>
+where
+    T: Ord,
+    F: FnMut(&(T, usize)) -> bool,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(val, _seq)| val)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
     }
 }
