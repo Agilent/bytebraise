@@ -11,8 +11,7 @@ use std::fmt::{Display, Formatter, Write};
 #[derive(Debug)]
 pub(crate) struct Variable {
     pub(crate) name: String,
-    pub(crate) operations: FifoHeap<VariableOperation>,
-    cached_value: RefCell<Option<String>>,
+    pub(crate) cached_value: RefCell<Option<String>>,
     // map of varflag name => heap of operations
     // for example, in:
     //   A[depends] = "q'
@@ -27,7 +26,7 @@ pub(crate) struct Variable {
     //  Calling get_var_flag "A:pn-specific" does give "d", however.
     //  This is kind of confusiong, so perhaps we shouldn't blinding re-use `VariableOperation` here,
     //  since the semantics are so different.
-    varflags: BTreeMap<String, FifoHeap<VariableOperation>>, // TODO: iterative cache for OVERRIDES
+    pub(crate) varflags: BTreeMap<String, FifoHeap<VariableOperation>>, // TODO: iterative cache for OVERRIDES
 }
 
 #[derive(Debug)]
@@ -86,7 +85,6 @@ impl GraphItem {
     pub(crate) fn new_variable<T: Into<String>>(name: T) -> GraphItem {
         GraphItem::Variable(Variable {
             name: name.into(),
-            operations: FifoHeap::new(),
             cached_value: RefCell::new(None),
             varflags: BTreeMap::new(),
         })

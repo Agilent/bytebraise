@@ -25,10 +25,10 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::{get_var, set_var, set_var_ex};
-use crate::nodes::{GraphItem, ScoredOperation};
+use crate::nodes::{GraphItem, ScoredOperation, Variable};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
-use crate::variable_parser::{parse_statement, parse_variable};
+use crate::variable_parser::{VariableExpressionKind, parse_statement, parse_variable};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
@@ -40,8 +40,9 @@ use once_cell::sync::Lazy;
 use petgraph::Direction;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::NodeIndex;
-use petgraph::prelude::StableGraph;
+use petgraph::prelude::{EdgeRef, StableGraph};
 use petgraph::stable_graph::DefaultIx;
+use petgraph::visit::IntoEdges;
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::borrow::Cow;
@@ -76,11 +77,21 @@ impl ExpansionState {
 
 #[derive(Debug)]
 pub struct DataSmart {
-    ds: StableGraph<GraphItem, u8>,
+    // TODO: edge type is Operator which is correct for Variable -> Statement edges
+    //  but will not work when we start adding Variable -> Variable edges (for caching)
+    ds: StableGraph<GraphItem, EdgeOperation>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
+
+    statement_id: usize,
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub struct EdgeOperation {
+    pub(crate) op_type: Operator,
+    pub(crate) sequence_id: usize,
 }
 
 pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
@@ -176,13 +187,14 @@ impl DataSmart {
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
+            statement_id: 0,
         }
     }
 
     pub fn dump<P: AsRef<Path>>(&self, path: P) {
         let mut f = File::create(path).unwrap();
-        let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeNoLabel]));
-        f.write_all(output.as_bytes()).unwrap();
+        // let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeIndexLabel]));
+        // f.write_all(output.as_bytes()).unwrap();
     }
 
     fn apply_removes(&self, input: &str, removes: &HashSet<String>) -> String {
@@ -286,20 +298,21 @@ impl DataSmart {
             .entry(base.to_string())
             .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(base)));
 
-        let var_data = self.ds.node_weight_mut(*var_entry).unwrap().variable_mut();
+        // // If not parsing, wipe away overrides
+        // if !parsing {
+        //     // TODO: not sure if it's this easy...
+        //     var_data.operations.clear();
+        // }
 
-        // If not parsing, wipe away overrides
-        if !parsing {
-            // TODO: not sure if it's this easy...
-            var_data.operations.clear();
-        }
-
-        var_data.operations.push(VariableOperation {
-            op_type: resolved_op,
-            idx: stmt_idx,
-        });
-
-        let _e = self.ds.add_edge(*var_entry, stmt_idx, 0);
+        let _e = self.ds.add_edge(
+            *var_entry,
+            stmt_idx,
+            EdgeOperation {
+                op_type: resolved_op,
+                sequence_id: self.statement_id,
+            },
+        );
+        self.statement_id += 1;
 
         Some(*var_entry)
     }
@@ -429,17 +442,17 @@ impl DataSmart {
                 self.ds.remove_node(stmt_node_index);
             }
 
-            let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
-            var_node.operations.retain(|op| {
-                if stmts.contains(&op.idx) {
-                    eprintln!("delete {:?}", op.idx);
-                }
-                !stmts.contains(&op.idx)
-            });
-
-            if var_node.operations.is_empty() {
-                deleted_all_stmts = true;
-            }
+            // let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
+            // var_node.operations.retain(|op| {
+            //     if stmts.contains(&op.idx) {
+            //         eprintln!("delete {:?}", op.idx);
+            //     }
+            //     !stmts.contains(&op.idx)
+            // });
+            //
+            // if var_node.operations.is_empty() {
+            //     deleted_all_stmts = true;
+            // }
         }
 
         Ok(())
@@ -463,6 +476,13 @@ impl DataSmart {
         let old_parsed = parse_variable(old);
         let new_parsed = parse_variable(new);
 
+        let old_base = &old_parsed.var_base;
+        let new_base = &new_parsed.var_base;
+
+        // Extract the override match targets (e.g., ["a"])
+        let old_target_scope = old_parsed.override_scope();
+        let new_target_scope = new_parsed.override_scope();
+
         // Get unexpanded value of the full old var, and assign it to new var
         let mut new_var_index = None;
         if let Some(old_val) = get_var!(&self, old, parsing = true, expand = false) {
@@ -472,53 +492,84 @@ impl DataSmart {
         let new_var_index = new_var_index.unwrap();
 
         let old_var_index = *self.vars.get(&old_parsed.var_base).unwrap();
+        // --- PHASE 1: Collect Statements to Move (Immutable Read) ---
+        // Tracks: (Statement Node Index, The Edge Metadata to preserve order/operators)
+        let mut statements_to_move: Vec<(NodeIndex, EdgeOperation)> = Vec::new();
 
-        let scope_set: IndexSet<String> = old_parsed.override_scope().iter().cloned().collect();
-        let mut ops_to_move = Vec::new();
+        let mut walker = self
+            .ds
+            .neighbors_directed(old_var_index, petgraph::Direction::Outgoing)
+            .detach();
+        while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
+            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
+                // Extract the scope vectors depending on Assignment vs OverrideOperation
+                let stmt_scope = match &stmt.lhs.kind {
+                    VariableExpressionKind::Assignment { scope } => scope,
+                    VariableExpressionKind::OverrideOperation { scope, .. } => scope,
+                };
 
-        // We use an immutable borrow of self.ds to check conditions
-        if let Some(GraphItem::Variable(old_var_node)) = self.ds.node_weight(old_var_index) {
-            for op in old_var_node.operations.iter() {
-                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(op.idx) {
-                    let stmt_scope_set: IndexSet<String> =
-                        stmt.lhs.override_scope().iter().cloned().collect();
-
-                    if scope_set.is_subset(&stmt_scope_set) {
-                        // Store the operation descriptor for the mutation phase
-                        ops_to_move.push(*op);
-                    }
+                // Check if the statement's scope matches or extends our target rename path
+                // e.g., does ["a", "b"] start with ["a"]?
+                if stmt_scope.starts_with(&old_target_scope) {
+                    let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
+                    statements_to_move.push((target_node_idx, op_metadata));
                 }
             }
         }
 
-        for op in &ops_to_move {
-            // Update the statement node data
-            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(op.idx) {
-                stmt.lhs.var_base = new_parsed.var_base.clone();
-            }
+        // If no statements matched the criteria, we can exit early
+        if statements_to_move.is_empty() {
+            return Ok(());
+        }
 
-            // Update graph edges
-            if let Some(edge) = self.ds.find_edge(old_var_index, op.idx) {
+        // --- PHASE 2: Ensure Target Root Exists (Mutable Setup) ---
+        // If root variable "V" doesn't exist yet in the graph, initialize it now
+        let new_var_index = match self.vars.get(new_base) {
+            Some(&idx) => idx,
+            None => {
+                let new_node = self.ds.add_node(GraphItem::Variable(Variable {
+                    name: new_base.clone(),
+                    cached_value: RefCell::new(None),
+                    varflags: BTreeMap::new(),
+                }));
+                self.vars.insert(new_base.clone(), new_node);
+                new_node
+            }
+        };
+
+        // --- PHASE 3: Mutate Statement Internals & Re-Scope ---
+        for (stmt_idx, _) in &statements_to_move {
+            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
+                // 1. Change the base root name (e.g., "A" -> "V")
+                stmt.lhs.var_base = new_base.clone();
+
+                // 2. Adjust internal scopes if the renaming changed the scope depth/names
+                // e.g., if renaming "A:a" to "V:x", ["a", "b"] needs to become ["x", "b"]
+                if old_target_scope != new_target_scope {
+                    let stmt_scope = match &mut stmt.lhs.kind {
+                        VariableExpressionKind::Assignment { scope } => scope,
+                        VariableExpressionKind::OverrideOperation { scope, .. } => scope,
+                    };
+
+                    // Strip the old prefix and splice the new prefix on
+                    let remaining_scope = stmt_scope.split_off(old_target_scope.len());
+                    let mut updated_scope = new_target_scope.clone();
+                    updated_scope.extend(remaining_scope);
+                    *stmt_scope = updated_scope;
+                }
+            }
+        }
+
+        // --- PHASE 4: Graph Topology Updates (Shift Edges) ---
+        for (stmt_idx, op_metadata) in statements_to_move {
+            // Disconnect from the old variable node ("A")
+            if let Some(edge) = self.ds.find_edge(old_var_index, stmt_idx) {
                 self.ds.remove_edge(edge);
             }
-            self.ds.add_edge(new_var_index, op.idx, 1);
-        }
 
-        // Remove the operations from the old variable
-        if let Some(GraphItem::Variable(old_var_node)) = self.ds.node_weight_mut(old_var_index) {
-            old_var_node
-                .operations
-                .retain(|op| !ops_to_move.contains(op));
+            // Connect to the new variable node ("V")
+            self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
         }
-
-        if let Some(GraphItem::Variable(new_var_node)) = self.ds.node_weight_mut(new_var_index) {
-            for op in ops_to_move {
-                new_var_node.operations.push(op);
-            }
-        }
-
-        self.del_var(old)?;
-        dbg!(&self.vars);
 
         Ok(())
     }
@@ -688,9 +739,27 @@ impl DataSmart {
             true => override_state.clone(),
         };
 
+        let mut o: Vec<(usize, VariableOperation)> = vec![];
+        let mut operations: FifoHeap<VariableOperation> = FifoHeap::new();
+
+        for edge in self.ds.edges(*var_entry) {
+            o.push((
+                edge.weight().sequence_id,
+                VariableOperation {
+                    op_type: edge.weight().op_type,
+                    idx: edge.target(),
+                },
+            ))
+        }
+
+        o.sort_by_key(|e| e.0);
+
+        for op in o {
+            operations.push(op.1);
+        }
+
         // Calculate override scores for operations
-        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = var_data
-            .operations
+        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = operations
             .iter()
             .filter_map(|op| {
                 let statement = self.ds.node_weight(op.idx).unwrap().statement();
@@ -916,11 +985,8 @@ impl DataSmart {
 
         for var in &self.vars {
             // Iterate over statements
-            let var_node = self.ds.node_weight(*var.1).unwrap().variable();
-            dbg!(var_node);
-            for stmt in var_node.operations.iter() {
-                let stmt_node = self.ds.node_weight(stmt.idx).unwrap().statement();
-                // dbg!(stmt_node);
+            for edge in self.ds.edges(*var.1) {
+                let stmt_node = self.ds.node_weight(edge.target()).unwrap().statement();
 
                 let scope = stmt_node.lhs.override_scope();
                 let mut parts = vec![var.0.clone()];
@@ -936,14 +1002,6 @@ impl DataSmart {
                     parts.pop();
                     ret.insert(parts.join(":"));
                 }
-
-                // if stmt_node
-                //     .lhs
-                //     .kind
-                //     .is_active(&Cow::Owned(IndexSet::default()), &override_state)
-                // {
-                //     todo!();
-                // }
             }
         }
 
