@@ -556,17 +556,31 @@ impl DataSmart {
             }
         }
 
-        // --- PHASE 4: Graph Topology Updates ---
+        // --- PHASE 4: Graph Topology Updates (With Edge Type Synchronization) ---
         for (edge_idx, stmt_idx, mut op_metadata) in edges_to_move {
-            // 1. Remove the old edge first
+            // 1. Terminate the old connection
             self.ds.remove_edge(edge_idx);
 
-            // 2. CRITICAL: Update the sequence ID to the current "now".
-            //    This ensures the renamed operation applies AFTER all existing static metadata.
+            // 2. Fetch the newly mutated statement to copy its actual structural type
+            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(stmt_idx) {
+                // Update the edge type to match the statement type (Normal vs Override)
+                op_metadata.op_type = match &stmt.lhs.kind {
+                    VariableExpressionKind::Assignment { .. } => {
+                        // Preserves Normal(Assign), Normal(AppendVar), etc.
+                        op_metadata.op_type
+                    }
+                    VariableExpressionKind::OverrideOperation { operator, .. } => {
+                        // Automatically fixes Normal(Assign) -> Override(Append)
+                        Operator::from(*operator) // Adjust to your actual enum path
+                    }
+                };
+            }
+
+            // 3. Apply the fresh late-execution sequence ID
             op_metadata.sequence_id = self.statement_id;
             self.statement_id += 1;
 
-            // 3. Connect to the new variable node
+            // 4. Attach the updated edge to the new parent node
             self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
         }
 
