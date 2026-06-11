@@ -56,7 +56,7 @@ fn evaluate_assignment_expression(
     let key = ident.identifier().syntax().text().to_string();
     let varflag_text = ident.varflag().map(|v| v.value().to_string());
     if varflag_text.is_some() {
-        unimplemented!();
+        unimplemented!("{:?}", varflag_text);
     }
 
     let assigned_value = expr.right().value().to_string();
