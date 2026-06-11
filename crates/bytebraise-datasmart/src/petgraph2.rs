@@ -36,7 +36,6 @@ use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use once_cell::sync::Lazy;
 use petgraph::Direction;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -53,14 +52,16 @@ use std::fs::File;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::LazyLock;
 
 // TODO: check for latest version in upstream bitbake
-static VAR_EXPANSION_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
+static VAR_EXPANSION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$\{[a-zA-Z0-9\-_+./~]+?}").unwrap());
 
-static PYTHON_EXPANSION_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{@.+?}").unwrap());
+static PYTHON_EXPANSION_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$\{@.+?}").unwrap());
 
-static WHITESPACE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s").unwrap());
+static WHITESPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s").unwrap());
 
 #[derive(Debug)]
 struct ExpansionState {
@@ -177,7 +178,7 @@ impl Default for DataSmart {
     }
 }
 
-static OVERRIDE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w+$").unwrap());
+static OVERRIDE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\w+$").unwrap());
 
 impl DataSmart {
     pub fn new() -> DataSmart {
