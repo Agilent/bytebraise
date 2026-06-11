@@ -1044,6 +1044,8 @@ MY_VAR:append:a = "?"
         "#,
         );
 
+        d.dump("/tmp/after.dot");
+
         assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "base");
         assert_eq!(get_var!(&d, "MY_VAR:a").unwrap(), "different!");
     }

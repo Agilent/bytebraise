@@ -29,10 +29,12 @@ TEST:a = "3"
     d.rename_var("TEST:a:b", "WAT").unwrap();
 
     assert_eq!(get_var!(&d, "WAT").unwrap(), "2");
-    assert_eq!(get_var!(&d, "TEST:a:b:c").unwrap(), "1");
+    assert_eq!(get_var!(&d, "TEST:a:b:c"), None);
     assert_eq!(get_var!(&d, "TEST:a:b"), None);
     assert_eq!(get_var!(&d, "TEST:a").unwrap(), "3");
     assert_eq!(get_var!(&d, "TEST"), None);
+
+    assert_eq!(get_var!(&d, "WAT:c").unwrap(), "1");
 }
 
 #[test_log::test]
@@ -78,15 +80,17 @@ OVERRIDES = "a:b"
     d.rename_var("TEST", "WAT").unwrap();
     eprintln!();
 
+    d.dump("/tmp/after.dot");
+
     let p = d.get_all_keys();
-    assert_eq!(p, vec!["WAT:a", "WAT:a:b", "WAT:a:b:c"]);
+    assert_eq!(p, vec!["OVERRIDES", "WAT", "WAT:a", "WAT:a:b", "WAT:a:b:c"]);
 
     assert!(get_var!(&d, "TEST").is_none());
     assert!(get_var!(&d, "TEST:a:b:c").is_none());
     assert!(get_var!(&d, "TEST:a:b").is_none());
     assert!(get_var!(&d, "TEST:a").is_none());
-    assert!(get_var!(&d, "WAT").is_none());
 
+    assert_eq!(get_var!(&d, "WAT").unwrap(), "2");
     assert_eq!(get_var!(&d, "WAT:a:b:c").unwrap(), "1");
     assert_eq!(get_var!(&d, "WAT:a:b").unwrap(), "2");
     assert_eq!(get_var!(&d, "WAT:a").unwrap(), "3");
@@ -321,8 +325,7 @@ OVERRIDES = "a"
     );
 
     d.expand_keys().unwrap();
-    //d.dump();
+    d.dump("/tmp/after.dot");
 
-    assert_eq!(get_var!(&d, "TEST:q").unwrap(), "P");
-    panic!();
+    assert_eq!(get_var!(&d, "TEST:q").unwrap(), "2");
 }

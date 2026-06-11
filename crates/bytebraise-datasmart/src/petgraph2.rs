@@ -521,7 +521,6 @@ impl DataSmart {
         };
 
         // --- PHASE 1: Collect and Explicitly Isolate Edge IDs (Immutable Read) ---
-        // Change tracking to hold the physical EdgeIndex so we can delete it directly
         let mut edges_to_move = Vec::new();
 
         let mut walker = self
@@ -532,7 +531,6 @@ impl DataSmart {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
                 if stmt.lhs.override_scope().starts_with(&old_target_scope) {
                     let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
-                    // Store edge index, statement index, and metadata
                     edges_to_move.push((edge_idx, target_node_idx, op_metadata));
                 }
             }
@@ -542,7 +540,6 @@ impl DataSmart {
             return Ok(());
         }
 
-        // TODO more elegant? e.g. with an intermediate heap?
         edges_to_move.sort_by_key(|o| o.2.sequence_id);
 
         // --- PHASE 2: Ensure Target Root Exists ---
@@ -560,32 +557,36 @@ impl DataSmart {
         };
 
         // --- PHASE 3: Mutate Statement Internals & Re-Shape ---
+        let mut moving_a_base_assignment = false;
+
         for (_, stmt_idx, _) in &edges_to_move {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
                 eprintln!("original statement {stmt:?}");
 
-                // 1. Update the base variable name
+                // 1. Update the base variable base name natively
                 stmt.lhs.var_base = new_base.clone();
 
-                // 2. Adjust the scope dynamically without replacing the underlying layout 'kind'
+                // 2. Adjust scopes dynamically without blindly discarding the layout 'kind'
                 match &mut stmt.lhs.kind {
                     Assignment { scope } => {
-                        // Extract any trailing scopes beyond what was matched by rename_var
                         let trailing_scope = scope.split_off(old_target_scope.len());
 
-                        // Reconstruct the scope by blending new_parsed's scope with the trailing ones
                         match &new_parsed.kind {
                             Assignment { scope: new_scope } => {
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
                                 *scope = updated_scope;
+
+                                // If the resulting full expression maps to a plain base assignment (no overrides left),
+                                // it means BitBake's setVar semantic will clobber any existing base value on the target node.
+                                if scope.is_empty() {
+                                    moving_a_base_assignment = true;
+                                }
                             }
                             OverrideOperation { scope: new_scope, operator, filter } => {
-                                // If expanding "TEST:${A}" where A="append" transforms it into an OverrideOperation,
-                                // we must transmute this statement's layout kind entirely.
+                                // If the expanded baseline introduces an operator, transmute the structure
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
-
                                 stmt.lhs.kind = OverrideOperation {
                                     scope: updated_scope,
                                     operator: *operator,
@@ -594,23 +595,21 @@ impl DataSmart {
                             }
                         }
                     }
-                    OverrideOperation { scope, operator, filter } => {
+                    OverrideOperation { scope, .. } => {
+                        // FIXES THE TODO: Keep the existing OverrideOperation layout intact!
                         let trailing_scope = scope.split_off(old_target_scope.len());
 
                         match &new_parsed.kind {
                             Assignment { scope: new_scope } => {
+                                // Just prepend the new prefix scope fragments from new_parsed
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
                                 *scope = updated_scope;
                             }
-                            OverrideOperation { scope: new_scope, operator: new_op, filter: new_filter } => {
-                                // If both were OverrideOperations, the incoming new_parsed operator takes precedence
-                                // over the base, but we retain trailing structure.
+                            OverrideOperation { scope: new_scope, .. } => {
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
                                 *scope = updated_scope;
-                                *operator = *new_op;
-                                *filter = new_filter.clone();
                             }
                         }
                     }
@@ -619,38 +618,50 @@ impl DataSmart {
             }
         }
 
+        // --- PHASE 3.5: Handle BitBake setVar Clobbering ---
+        // If we are moving a pure base assignment into the destination variable node,
+        // BitBake semantics dictate that the previous destination base assignments are discarded.
+        if moving_a_base_assignment {
+            let mut dest_walker = self
+                .ds
+                .neighbors_directed(new_var_index, Direction::Outgoing)
+                .detach();
+
+            let mut dest_edges_to_remove = Vec::new();
+            while let Some((edge_idx, target_node_idx)) = dest_walker.next(&self.ds) {
+                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
+                    if let Assignment { scope } = &stmt.lhs.kind {
+                        if scope.is_empty() {
+                            dest_edges_to_remove.push((edge_idx, target_node_idx));
+                        }
+                    }
+                }
+            }
+
+            for (edge_idx, stmt_idx) in dest_edges_to_remove {
+                self.ds.remove_edge(edge_idx);
+                self.ds.remove_node(stmt_idx);
+            }
+        }
 
         // --- PHASE 4: Graph Topology Updates (With Edge Type Synchronization) ---
         for (edge_idx, stmt_idx, mut op_metadata) in edges_to_move {
-            // 1. Terminate the old connection
             self.ds.remove_edge(edge_idx);
 
-            // 2. Fetch the newly mutated statement to copy its actual structural type
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(stmt_idx) {
-                // Update the edge type to match the statement type (Normal vs Override)
                 op_metadata.op_type = match &stmt.lhs.kind {
-                    Assignment { .. } => {
-                        // Preserves Normal(Assign), Normal(AppendVar), etc.
-                        op_metadata.op_type
-                    }
-                    OverrideOperation { operator, .. } => {
-                        // Automatically fixes Normal(Assign) -> Override(Append)
-                        Operator::from(*operator) // Adjust to your actual enum path
-                    }
+                    Assignment { .. } => op_metadata.op_type,
+                    OverrideOperation { operator, .. } => Operator::from(*operator),
                 };
             }
 
-            // 3. Apply the fresh late-execution sequence ID
             op_metadata.sequence_id = self.statement_id;
             self.statement_id += 1;
 
-            // 4. Attach the updated edge to the new parent node
             self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
         }
 
         // --- PHASE 5: Clean Up Residual Variable Nodes ---
-        // If our old root ("TEST${B}") now has zero remaining outgoing statements,
-        // clear it out of our tracking variables entirely.
         let remaining_edges = self
             .ds
             .neighbors_directed(old_var_index, petgraph::Direction::Outgoing)
@@ -793,15 +804,6 @@ impl DataSmart {
 
         // Lookup the variable, otherwise return None
         let var_entry = self.vars.get(&parsed.var_base)?;
-        let var_data = self.ds.node_weight(*var_entry).unwrap().variable();
-
-        // // TODO: return directly from `override_state` for OVERRIDES?
-        // if var != "OVERRIDES" {
-        //     let cached = RefCell::borrow_mut(&var_data.cached_value);
-        //     if cached.is_some() {
-        //         return cached.clone();
-        //     }
-        // }
 
         // TODO: only do this if needed, i.e. if any operations with overrides are present
         // TODO: this method doesn't handle re-computing overrides!
@@ -853,39 +855,17 @@ impl DataSmart {
             .iter()
             .filter_map(|op| {
                 let statement = self.ds.node_weight(op.idx).unwrap().statement();
+                if !var_suffix.is_empty() {
+                    let stmt_scope = statement.lhs.kind.override_scope();
 
-                // TODO simplify
-                let original_override = statement.lhs.override_string();
-                let original_override = if original_override.is_empty() {
-                    None
-                } else {
-                    Some(original_override)
-                };
-
-                // if original_override.contains("$") {
-                //     eprintln!("rejecting original override: {}", &original_override);
-                //     return None;
-                // }
-
-                // TODO: no_weak_default option
-                // if var_op_kind == VariableOperationKind::WeakDefault {
-                //     return None;
-                // }
-
-                // Handle getting the value of a variable override flavor, e.g. `get_var("MY_VAR:a")`.
-                // In that case, pre-filter operations to select those with override strings starting with "a"
-                if !var_suffix.is_empty()
-                    && !original_override
-                        .as_ref()
-                        .is_some_and(|e| split_overrides(e).starts_with(var_suffix.as_slice()))
-                {
-                    //dbg!(op);
-                    return None;
+                    // Use exact slice equality so "a:append" (scope=["a"]) matches your lookup "MY_VAR:a" (var_suffix=["a"])
+                    if stmt_scope != var_suffix.as_slice() {
+                        return None;
+                    }
                 }
 
                 // If in parsing mode, filter out override operators
                 if parsing && statement.is_override_operation() {
-                    //dbg!(op);
                     return None;
                 }
 
@@ -894,15 +874,11 @@ impl DataSmart {
                     .kind
                     .is_active(&override_selection_context, &override_state)
                 {
-                    //dbg!(op);
                     return None;
                 }
 
-                //dbg!(op, &override_state);
-
                 // TODO: this re-checks is active basically.
                 let score = statement.lhs.kind.score(&override_selection_context)?;
-                //dbg!(op);
                 let ret = ScoredOperation {
                     stmt_index: op.idx,
                     score,
@@ -910,15 +886,13 @@ impl DataSmart {
                 };
 
                 Some(ret)
-                // TODO: place expanded LHS in the assignment cache?
             })
-            // TODO: something more efficient than a fold?
             .fold(FifoHeap::new(), |mut a, b| {
                 a.push(b);
                 a
             });
 
-        //dbg!(&resolved_variable_operations);
+        dbg!(&resolved_variable_operations);
 
         let resolved_start_value = resolved_variable_operations.first().cloned()?;
 
@@ -984,8 +958,8 @@ impl DataSmart {
         });
 
         eprintln!(
-            "start value = {:?} ",
-            ret,
+            "start value for get {:?} = {:?} ",
+            parsed, ret,
         );
 
         for op in resolved_variable_operations {
