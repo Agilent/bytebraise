@@ -193,8 +193,8 @@ impl DataSmart {
 
     pub fn dump<P: AsRef<Path>>(&self, path: P) {
         let mut f = File::create(path).unwrap();
-        // let output = format!("{}", Dot::with_config(&self.ds, &[Config::EdgeIndexLabel]));
-        // f.write_all(output.as_bytes()).unwrap();
+        let output = format!("{:?}", Dot::with_config(&self.ds, &[]));
+        f.write_all(output.as_bytes()).unwrap();
     }
 
     fn apply_removes(&self, input: &str, removes: &HashSet<String>) -> String {
@@ -303,6 +303,21 @@ impl DataSmart {
         //     // TODO: not sure if it's this easy...
         //     var_data.operations.clear();
         // }
+
+        if !parsing {
+            let existing_edges = self.ds.edges(*var_entry);
+            let mut s = vec![];
+
+            for edge in existing_edges {
+                s.push(edge.id());
+                // TODO delete node too
+            }
+            dbg!(&s);
+
+            for e in s {
+                self.ds.remove_edge(e);
+            }
+        }
 
         let _e = self.ds.add_edge(
             *var_entry,
@@ -491,13 +506,7 @@ impl DataSmart {
         let mut walker = self.ds.neighbors_directed(old_var_index, Direction::Outgoing).detach();
         while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
-
-                let stmt_scope = match &stmt.lhs.kind {
-                    VariableExpressionKind::Assignment { scope } => scope,
-                    VariableExpressionKind::OverrideOperation { scope, .. } => scope,
-                };
-
-                if stmt_scope.starts_with(&old_target_scope) {
+                if stmt.lhs.override_scope().starts_with(&old_target_scope) {
                     let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
                     // Store edge index, statement index, and metadata
                     edges_to_move.push((edge_idx, target_node_idx, op_metadata));
@@ -508,6 +517,9 @@ impl DataSmart {
         if edges_to_move.is_empty() {
             return Ok(());
         }
+
+        // TODO more elegant? e.g. with an intermediate heap?
+        edges_to_move.sort_by_key(|o| o.2.sequence_id);
 
         // --- PHASE 2: Ensure Target Root Exists ---
         let new_var_index = match self.vars.get(new_base) {

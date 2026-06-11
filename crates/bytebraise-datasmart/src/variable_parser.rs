@@ -120,6 +120,13 @@ impl VariableExpressionKind {
         }
     }
 
+    pub(crate) fn scope_ref(&self) -> &Vec<String> {
+        match self {
+            OverrideOperation { scope, .. } => scope,
+            Assignment { scope } => scope,
+        }
+    }
+
     pub(crate) fn override_string(&self) -> String {
         match self {
             OverrideOperation {

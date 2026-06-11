@@ -606,12 +606,18 @@ B = ":append"
         // assert_eq!(get_var!(&d, "TEST"), Some("1012".into()));
 
         // But synthesized appends only take the last one:
-        let mut d = DataSmart::new();
-        set_var!(&mut d, "TEST", "10");
-        set_var!(&mut d, "TEST:${A}", "1");
-        set_var!(&mut d, "TEST:${A}", "2");
-        set_var!(&mut d, "A", "append");
-        let p = d.expand_keys().unwrap();
+        let mut d = eval(
+            r#"
+TEST = "10"
+TEST:${A} = "1"
+TEST:${A} = "2"
+A = "append"
+            "#
+        );
+
+        d.expand_keys().unwrap();
+        d.dump("/tmp/dump.dot");
+
         assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
 
