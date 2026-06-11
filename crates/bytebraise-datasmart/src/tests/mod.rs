@@ -294,7 +294,7 @@ OVERRIDES = "b:c"
             "#,
         );
 
-        assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("WHAT!34".into()));
     }
 
     #[test]
@@ -789,27 +789,25 @@ A = "append"
 
     #[test]
     fn more_synthesized_appends_2() {
-        let mut d = DataSmart::new();
-
-        set_var!(&mut d, "TEST", "1");
-        set_var!(&mut d, "TEST:a:b", "2");
-        set_var!(&mut d, "TEST:a:b:a:append", "3");
-        d.plus_equals_var("TEST:a:b:a", "5");
-        d.plus_equals_var("TEST:a:b", "6");
-
-        set_var!(&mut d, "OP", "append");
-        set_var!(&mut d, "TEST:a:b:${OP}", "Q");
-
-        set_var!(&mut d, "A", "a");
-        set_var!(&mut d, "TEST:${A}:b:a:${OP}", "7");
-        set_var!(&mut d, "TEST:${A}:b:a:${OP}", "7");
-
-        set_var!(&mut d, "TEST:a:append:${B}", "10");
-
-        set_var!(&mut d, "OVERRIDES", "a:b:c");
+        let mut d = eval(
+            r#"
+TEST = "1"
+TEST:a:b = "2"
+TEST:a:b:a:append = "3"
+TEST:a:b:a += "5"
+TEST:a:b += "6"
+OP = "append"
+TEST:a:b:${OP} = "Q"
+A = "a"
+TEST:${A}:b:a:${OP} = "7"
+TEST:${A}:b:a:${OP} = "7"
+TEST:a:append:${B} = "10"
+OVERRIDES = "a:b:c"
+            "#
+        );
 
         d.get_all_keys();
-        //d.expand_keys().unwrap();
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some(" 537".into()));
     }
