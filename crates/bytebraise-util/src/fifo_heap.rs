@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::ops::{Bound, RangeBounds, RangeFull};
+use std::ops::{Bound, RangeBounds};
 
 #[derive(Clone, Debug)]
 pub struct FifoHeap<T> {

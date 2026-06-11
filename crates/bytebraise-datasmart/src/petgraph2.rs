@@ -24,11 +24,11 @@ Major todos:
 
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
-use crate::macros::{get_var, set_var, set_var_ex};
+use crate::macros::{get_var, set_var_ex};
 use crate::nodes::{GraphItem, ScoredOperation, Variable};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
-use crate::variable_parser::{VariableExpressionKind, parse_statement, parse_variable};
+use crate::variable_parser::{parse_statement, parse_variable};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
@@ -38,7 +38,7 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use petgraph::Direction;
-use petgraph::dot::{Config, Dot};
+use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::{EdgeRef, StableGraph};
 use petgraph::stable_graph::DefaultIx;
@@ -51,7 +51,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::Write;
-use std::ops::{Deref, IndexMut};
+use std::ops::Deref;
 use std::path::Path;
 
 // TODO: check for latest version in upstream bitbake
@@ -464,7 +464,7 @@ impl DataSmart {
             .neighbors_directed(var_index, Direction::Outgoing)
             .detach();
 
-        let mut deleted_all_stmts = false;
+        let _deleted_all_stmts = false;
         while let Some(stmt_node_index) = walker.next_node(&self.ds) {
             let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
 
@@ -528,11 +528,11 @@ impl DataSmart {
             .neighbors_directed(old_var_index, Direction::Outgoing)
             .detach();
         while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
-            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
-                if stmt.lhs.override_scope().starts_with(&old_target_scope) {
-                    let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
-                    edges_to_move.push((edge_idx, target_node_idx, op_metadata));
-                }
+            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx)
+                && stmt.lhs.override_scope().starts_with(&old_target_scope)
+            {
+                let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
+                edges_to_move.push((edge_idx, target_node_idx, op_metadata));
             }
         }
 
@@ -583,7 +583,11 @@ impl DataSmart {
                                     moving_a_base_assignment = true;
                                 }
                             }
-                            OverrideOperation { scope: new_scope, operator, filter } => {
+                            OverrideOperation {
+                                scope: new_scope,
+                                operator,
+                                filter,
+                            } => {
                                 // If the expanded baseline introduces an operator, transmute the structure
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
@@ -606,7 +610,9 @@ impl DataSmart {
                                 updated_scope.extend(trailing_scope);
                                 *scope = updated_scope;
                             }
-                            OverrideOperation { scope: new_scope, .. } => {
+                            OverrideOperation {
+                                scope: new_scope, ..
+                            } => {
                                 let mut updated_scope = new_scope.clone();
                                 updated_scope.extend(trailing_scope);
                                 *scope = updated_scope;
@@ -629,12 +635,11 @@ impl DataSmart {
 
             let mut dest_edges_to_remove = Vec::new();
             while let Some((edge_idx, target_node_idx)) = dest_walker.next(&self.ds) {
-                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
-                    if let Assignment { scope } = &stmt.lhs.kind {
-                        if scope.is_empty() {
-                            dest_edges_to_remove.push((edge_idx, target_node_idx));
-                        }
-                    }
+                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx)
+                    && let Assignment { scope } = &stmt.lhs.kind
+                    && scope.is_empty()
+                {
+                    dest_edges_to_remove.push((edge_idx, target_node_idx));
                 }
             }
 
@@ -957,10 +962,7 @@ impl DataSmart {
                             || op.stmt.lhs.kind.override_scope().is_empty())))
         });
 
-        eprintln!(
-            "start value for get {:?} = {:?} ",
-            parsed, ret,
-        );
+        eprintln!("start value for get {:?} = {:?} ", parsed, ret,);
 
         for op in resolved_variable_operations {
             // Weak default is handled the same as assign - priority selection happened above

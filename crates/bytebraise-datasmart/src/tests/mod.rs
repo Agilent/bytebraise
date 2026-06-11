@@ -803,7 +803,7 @@ TEST:${A}:b:a:${OP} = "7"
 TEST:${A}:b:a:${OP} = "7"
 TEST:a:append:${B} = "10"
 OVERRIDES = "a:b:c"
-            "#
+            "#,
         );
 
         d.get_all_keys();
