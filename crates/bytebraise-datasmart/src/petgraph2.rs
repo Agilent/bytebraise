@@ -681,51 +681,6 @@ impl DataSmart {
         Ok(())
     }
 
-    /// There are three kinds of unexpanded keys we need to handle.
-    ///
-    /// Case 1: Unexpanded override(s)
-    /// Example:
-    ///     VAR:${B} = "value"
-    ///     B = "whatever"
-    ///
-    /// Internally, there is a variable "VAR" with an operation ':${B} = "value"'
-    /// All we need to do is expand the ${B} part and adjust the variable operation for
-    /// VAR to reflect the new override string.
-    ///
-    /// Case 2: Unexpanded variable name
-    /// Example:
-    ///     VA${V} = "value"
-    ///     V = "R"
-    ///
-    /// Internally, there is a variable "VA${V}" with an operation '= "value"'.
-    ///
-    /// In BitBake, expandKeys() here triggers a call to renameVar("VA${V}", "VAR"). BitBake's
-    /// renameVar() does the following:
-    ///     1. Gets the unexpanded value of VA${V} (in parsing mode, so override-style appends,
-    ///         prepends, and removes are not applied)
-    ///     2. Calls setVar("VAR", <value>). setVar is also called in parsing mode, which blows
-    ///         away all appends, prepends, and removes on VAR.
-    ///     3. Transfers the appends, prepends, and removes from VA${V} to VAR. Not sure why it does this,
-    ///         since it essentially undoes the blowing away of those varflags from (2).
-    ///     4. Calls delVar("VA${V}")
-    ///
-    /// We are in a position to do all of this much more simply:
-    ///     1. Create a "VAR" node.
-    ///     2. Transfer operations from VA${V} node onto the VAR node.
-    ///     3. Delete VA${V} node.
-    ///
-    ///
-    /// Another example:
-    ///     VAR = "value"
-    ///     VA${V}:append = " appended"
-    ///     V = "R"
-    ///
-    /// Internally, we have three variables each with a single operation.
-    ///
-    /// We need to do this:
-    ///     1. Transfer operations from VA${V} node onto the VAR node.
-    ///     2. Delete VA${V} node.
-    ///
     #[tracing::instrument(skip_all)]
     pub fn expand_keys(&mut self) -> DataSmartResult<Vec<String>> {
         let mut todolist = BTreeMap::new();
@@ -822,12 +777,12 @@ impl DataSmart {
 
         // The union of active overrides with whatever overrides were provided in the
         // direct-variant lookup. This is only used for override-scoped operators.
-        let var_suffix = parsed.override_scope();
+        let var_suffix = parsed.override_scope().to_vec();
         let override_selection_context: Cow<IndexSet<String>> = match var_suffix.is_empty() {
             false => {
                 // TODO: revisit: are we sure the new overrides should be inserted into the beginning?
                 let mut new_overrides = IndexSet::from_iter(var_suffix.clone());
-                for old_override in override_state.deref() {
+                for old_override in override_state.iter() {
                     new_overrides.insert(old_override.clone());
                 }
 
@@ -1048,7 +1003,7 @@ impl DataSmart {
             for edge in self.ds.edges(*var.1) {
                 let stmt_node = self.ds.node_weight(edge.target()).unwrap().statement();
 
-                let scope = stmt_node.lhs.override_scope();
+                let scope = stmt_node.lhs.override_scope().to_vec();
                 let mut parts = vec![var.0.clone()];
                 parts.extend(scope);
                 ret.insert(parts.join(":"));

@@ -53,7 +53,7 @@ impl VariableExpression {
         self.kind.override_string()
     }
 
-    pub(crate) fn override_scope(&self) -> Vec<String> {
+    pub(crate) fn override_scope(&self) -> &[String] {
         self.kind.override_scope()
     }
 }
@@ -113,17 +113,10 @@ impl VariableExpressionKind {
         }
     }
 
-    pub(crate) fn override_scope(&self) -> Vec<String> {
+    pub(crate) fn override_scope(&self) -> &[String] {
         match self {
-            OverrideOperation { scope, .. } => scope.clone(),
-            Assignment { scope } => scope.clone(),
-        }
-    }
-
-    pub(crate) fn scope_ref(&self) -> &Vec<String> {
-        match self {
-            OverrideOperation { scope, .. } => scope,
-            Assignment { scope } => scope,
+            OverrideOperation { scope, .. } => scope.as_slice(),
+            Assignment { scope } => scope.as_slice(),
         }
     }
 
