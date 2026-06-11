@@ -160,6 +160,8 @@ TEST:append = "2"
             "#,
         );
 
+        d.dump("/tmp/before.dot");
+
         assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
 
@@ -464,38 +466,50 @@ OVERRIDES = "a:b"
 
     #[test]
     fn tricky_2() {
-        let mut d = DataSmart::new();
-        set_var!(&mut d, "TEST", "1");
-        set_var!(&mut d, "TEST:c:b:a:b:c", "2");
-        set_var!(&mut d, "TEST:a:b:c", "3");
-        set_var!(&mut d, "OVERRIDES", "a:b:c");
+        let d = eval(
+            r#"
+TEST = "1"
+TEST:c:b:a:b:c = "2"
+TEST:a:b:c = "3"
+OVERRIDES = "a:b:c"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
 
-        let mut d = DataSmart::new();
-        set_var!(&mut d, "TEST", "1");
-        set_var!(&mut d, "TEST:a:b:c", "3");
-        set_var!(&mut d, "TEST:c:b:a:b:c", "2");
-        set_var!(&mut d, "OVERRIDES", "a:b:c");
+        let d = eval(
+            r#"
+TEST = "1"
+TEST:a:b:c = "3"
+TEST:c:b:a:b:c = "2"
+OVERRIDES = "a:b:c"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
     fn tricky_3() {
-        let mut d = DataSmart::new();
-        set_var!(&mut d, "TEST", "1");
-        set_var!(&mut d, "TEST:a:b:c", "3");
-        set_var!(&mut d, "TEST:a:b:c:a", "4");
-        set_var!(&mut d, "OVERRIDES", "a:b:c");
+        let d = eval(
+            r#"
+TEST = "1"
+TEST:a:b:c = "3"
+TEST:a:b:c:a = "4"
+OVERRIDES = "a:b:c"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
 
-        let mut d = DataSmart::new();
-        set_var!(&mut d, "TEST", "1");
-        set_var!(&mut d, "TEST:a:b:c:a", "4");
-        set_var!(&mut d, "TEST:a:b:c", "3");
-        set_var!(&mut d, "OVERRIDES", "a:b:c");
+        let d = eval(
+            r#"
+TEST = "1"
+TEST:a:b:c:a = "4"
+TEST:a:b:c = "3"
+OVERRIDES = "a:b:c"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
@@ -612,7 +626,7 @@ TEST = "10"
 TEST:${A} = "1"
 TEST:${A} = "2"
 A = "append"
-            "#
+            "#,
         );
 
         d.expand_keys().unwrap();

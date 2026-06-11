@@ -288,6 +288,7 @@ impl DataSmart {
 
         let stmt_node = parse_statement(&var, normal_operator, value.into())?;
         let base = stmt_node.lhs.var_base.clone();
+        let lhs_cloned = stmt_node.lhs.clone();
 
         let resolved_op = stmt_node.resolved_operator();
         let stmt_idx = self.ds.add_node(GraphItem::StmtNode(stmt_node));
@@ -304,15 +305,35 @@ impl DataSmart {
         //     var_data.operations.clear();
         // }
 
-        if !parsing {
+        // if !parsing {
+        //     let existing_edges = self.ds.edges(*var_entry);
+        //     let mut s = vec![];
+        //
+        //     for edge in existing_edges {
+        //         s.push(edge.id());
+        //         // TODO delete node too
+        //     }
+        //     dbg!(&s);
+        //
+        //     for e in s {
+        //         self.ds.remove_edge(e);
+        //     }
+        // }
+
+        if normal_operator == NormalOperator::Assign {
             let existing_edges = self.ds.edges(*var_entry);
             let mut s = vec![];
 
             for edge in existing_edges {
-                s.push(edge.id());
+                if edge.weight().op_type == Operator::Normal(NormalOperator::Assign) {
+                    let stmt = self.ds.node_weight(edge.target()).unwrap().statement();
+
+                    if lhs_cloned == stmt.lhs {
+                        s.push(edge.id());
+                    }
+                }
                 // TODO delete node too
             }
-            dbg!(&s);
 
             for e in s {
                 self.ds.remove_edge(e);
@@ -503,7 +524,10 @@ impl DataSmart {
         // Change tracking to hold the physical EdgeIndex so we can delete it directly
         let mut edges_to_move = Vec::new();
 
-        let mut walker = self.ds.neighbors_directed(old_var_index, Direction::Outgoing).detach();
+        let mut walker = self
+            .ds
+            .neighbors_directed(old_var_index, Direction::Outgoing)
+            .detach();
         while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx) {
                 if stmt.lhs.override_scope().starts_with(&old_target_scope) {
@@ -538,35 +562,63 @@ impl DataSmart {
         // --- PHASE 3: Mutate Statement Internals & Re-Shape ---
         for (_, stmt_idx, _) in &edges_to_move {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
-                let stmt_scope_len = match &stmt.lhs.kind {
-                    VariableExpressionKind::Assignment { scope } => scope.len(),
-                    VariableExpressionKind::OverrideOperation { scope, .. } => scope.len(),
-                };
+                eprintln!("original statement {stmt:?}");
 
-                let trailing_scope_count = stmt_scope_len - old_target_scope.len();
-                let mut updated_lhs = new_parsed.clone();
+                // 1. Update the base variable name
+                stmt.lhs.var_base = new_base.clone();
 
-                if trailing_scope_count > 0 {
-                    let stmt_scope = match &stmt.lhs.kind {
-                        VariableExpressionKind::Assignment { scope } => scope,
-                        VariableExpressionKind::OverrideOperation { scope, .. } => scope,
-                    };
+                // 2. Adjust the scope dynamically without replacing the underlying layout 'kind'
+                match &mut stmt.lhs.kind {
+                    Assignment { scope } => {
+                        // Extract any trailing scopes beyond what was matched by rename_var
+                        let trailing_scope = scope.split_off(old_target_scope.len());
 
-                    let trailing_overrides = &stmt_scope[old_target_scope.len()..];
+                        // Reconstruct the scope by blending new_parsed's scope with the trailing ones
+                        match &new_parsed.kind {
+                            Assignment { scope: new_scope } => {
+                                let mut updated_scope = new_scope.clone();
+                                updated_scope.extend(trailing_scope);
+                                *scope = updated_scope;
+                            }
+                            OverrideOperation { scope: new_scope, operator, filter } => {
+                                // If expanding "TEST:${A}" where A="append" transforms it into an OverrideOperation,
+                                // we must transmute this statement's layout kind entirely.
+                                let mut updated_scope = new_scope.clone();
+                                updated_scope.extend(trailing_scope);
 
-                    match &mut updated_lhs.kind {
-                        VariableExpressionKind::Assignment { scope } => {
-                            scope.extend(trailing_overrides.iter().cloned());
+                                stmt.lhs.kind = OverrideOperation {
+                                    scope: updated_scope,
+                                    operator: *operator,
+                                    filter: filter.clone(),
+                                };
+                            }
                         }
-                        VariableExpressionKind::OverrideOperation { scope, .. } => {
-                            scope.extend(trailing_overrides.iter().cloned());
+                    }
+                    OverrideOperation { scope, operator, filter } => {
+                        let trailing_scope = scope.split_off(old_target_scope.len());
+
+                        match &new_parsed.kind {
+                            Assignment { scope: new_scope } => {
+                                let mut updated_scope = new_scope.clone();
+                                updated_scope.extend(trailing_scope);
+                                *scope = updated_scope;
+                            }
+                            OverrideOperation { scope: new_scope, operator: new_op, filter: new_filter } => {
+                                // If both were OverrideOperations, the incoming new_parsed operator takes precedence
+                                // over the base, but we retain trailing structure.
+                                let mut updated_scope = new_scope.clone();
+                                updated_scope.extend(trailing_scope);
+                                *scope = updated_scope;
+                                *operator = *new_op;
+                                *filter = new_filter.clone();
+                            }
                         }
                     }
                 }
-
-                stmt.lhs = updated_lhs;
+                eprintln!("mutated statement {:?}", stmt);
             }
         }
+
 
         // --- PHASE 4: Graph Topology Updates (With Edge Type Synchronization) ---
         for (edge_idx, stmt_idx, mut op_metadata) in edges_to_move {
@@ -577,11 +629,11 @@ impl DataSmart {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(stmt_idx) {
                 // Update the edge type to match the statement type (Normal vs Override)
                 op_metadata.op_type = match &stmt.lhs.kind {
-                    VariableExpressionKind::Assignment { .. } => {
+                    Assignment { .. } => {
                         // Preserves Normal(Assign), Normal(AppendVar), etc.
                         op_metadata.op_type
                     }
-                    VariableExpressionKind::OverrideOperation { operator, .. } => {
+                    OverrideOperation { operator, .. } => {
                         // Automatically fixes Normal(Assign) -> Override(Append)
                         Operator::from(*operator) // Adjust to your actual enum path
                     }
@@ -599,7 +651,10 @@ impl DataSmart {
         // --- PHASE 5: Clean Up Residual Variable Nodes ---
         // If our old root ("TEST${B}") now has zero remaining outgoing statements,
         // clear it out of our tracking variables entirely.
-        let remaining_edges = self.ds.neighbors_directed(old_var_index, petgraph::Direction::Outgoing).count();
+        let remaining_edges = self
+            .ds
+            .neighbors_directed(old_var_index, petgraph::Direction::Outgoing)
+            .count();
         if remaining_edges == 0 {
             self.vars.remove(old_base);
             self.ds.remove_node(old_var_index);
@@ -607,12 +662,8 @@ impl DataSmart {
 
         self.del_var(old)?;
 
-        dbg!(&self.vars);
-        dbg!(&self.ds);
-
         Ok(())
     }
-
 
     /// There are three kinds of unexpanded keys we need to handle.
     ///
@@ -676,7 +727,6 @@ impl DataSmart {
         }
 
         let ret = todolist.keys().cloned().sorted().collect_vec();
-        dbg!(&ret);
         for o in todolist.into_iter() {
             eprintln!("rename {} to {}", o.0, o.1);
             self.rename_var(o.0, o.1)?;
@@ -868,11 +918,7 @@ impl DataSmart {
                 a
             });
 
-        // eprintln!("SCORING: ");
-        // for item in resolved_variable_operations.iter() {
-        //     dbg!(item);
-        // }
-        // eprintln!("=====");
+        //dbg!(&resolved_variable_operations);
 
         let resolved_start_value = resolved_variable_operations.first().cloned()?;
 
@@ -925,13 +971,6 @@ impl DataSmart {
             _ => RetValue::Eager(resolved_start_value.stmt.rhs.clone()),
         };
 
-        // eprintln!(
-        //     "start value = {:?} @ score: {:?} with LHS: {:?}",
-        //     ret,
-        //     resolved_start_value.override_score(),
-        //     resolved_start_value.override_lhs()
-        // );
-
         // TODO: filter in loop below?
         resolved_variable_operations.retain(|op| {
             // Remove the variable operation that we used for the start value, so we don't double apply
@@ -943,6 +982,11 @@ impl DataSmart {
                         && (op.stmt.lhs.kind.override_scope() == resolved_start_value.stmt.lhs.kind.override_scope()
                             || op.stmt.lhs.kind.override_scope().is_empty())))
         });
+
+        eprintln!(
+            "start value = {:?} ",
+            ret,
+        );
 
         for op in resolved_variable_operations {
             // Weak default is handled the same as assign - priority selection happened above

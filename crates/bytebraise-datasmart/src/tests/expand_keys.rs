@@ -12,7 +12,9 @@ B = "T"
         "#,
     );
 
+    d.dump("/tmp/before.dot");
     d.expand_keys().unwrap();
+    d.dump("/tmp/after.dot");
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), " b c");
 }
@@ -29,9 +31,12 @@ B = "T"
     );
 
     assert_eq!(d.get_all_keys(), vec!["B", "TES${B}", "TEST"]);
+    d.dump("/tmp/before.dot");
 
     // TODO: give 'replaces key' warning
     let todolist = d.expand_keys().unwrap();
+    d.dump("/tmp/after.dot");
+
     assert_eq!(todolist, vec!["TES${B}"]);
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "abc");
