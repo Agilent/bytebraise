@@ -18,7 +18,7 @@
 //! ```
 //!
 //! Let `MY_VAR` be the **base variable**, and let `MY_VAR:a` and `MY_VAR:a:b` be
-//! **override-qualified variables**. `My_VAR:a` and `MY_VAR:a:b` can also be called **override-qualified variants** of `MY_VAR`.
+//! **override-qualified variables**. `MY_VAR:a` and `MY_VAR:a:b` can also be called **override-qualified variants** of `MY_VAR`.
 //!
 //! BitBake informally calls the latter ["versions"](https://docs.yoctoproject.org/bitbake/bitbake-user-manual/bitbake-user-manual-metadata.html#conditional-metadata) of a variable.
 //!

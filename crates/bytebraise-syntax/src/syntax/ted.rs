@@ -87,7 +87,7 @@ pub fn insert_all(position: Position, elements: Vec<SyntaxElement>) {
     //     }
     // }
     // if let Some(last) = elements.last() {
-    //     if let Some(ws) = ws_after(&position, last) {1`
+    //     if let Some(ws) = ws_after(&position, last) {
     //         elements.push(ws.into());
     //     }
     // }
