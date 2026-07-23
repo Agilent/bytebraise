@@ -521,6 +521,8 @@ impl DataSmart {
             None => return Ok(()),
         };
 
+        // TODO: rewrite this slop
+
         // --- PHASE 1: Collect and Explicitly Isolate Edge IDs (Immutable Read) ---
         let mut edges_to_move = Vec::new();
 
