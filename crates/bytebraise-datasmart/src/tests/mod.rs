@@ -160,8 +160,6 @@ TEST:append = "2"
             "#,
         );
 
-        d.dump("/tmp/before.dot");
-
         assert_eq!(get_var!(&d, "TEST"), Some("12".into()));
     }
 
@@ -287,14 +285,14 @@ TEST:append = "3"
 TEST:append = "4"
 TEST:b:append = "BASE"
 TEST:b = "OH YES"
-TETS:c:prepend = "Q"
+TEST:c:prepend = "Q"
 TEST:c = "WHAT"
 TEST:c:append = "!"
 OVERRIDES = "b:c"
             "#,
         );
 
-        assert_eq!(get_var!(&d, "TEST"), Some("WHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
     }
 
     #[test]
@@ -322,7 +320,6 @@ OVERRIDES = "a:b"
             "#,
         );
 
-        // d.dump();
         d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some("firstOPwhy?".into()));
@@ -671,7 +668,6 @@ A = "append"
         );
 
         d.expand_keys().unwrap();
-        d.dump("/tmp/dump.dot");
 
         assert_eq!(get_var!(&d, "TEST"), Some("102".into()));
     }
@@ -860,12 +856,7 @@ OVERRIDES = "a:b:c"
             "#,
         );
 
-        //assert_eq!(get_var!(&d, "TEST"), Some(" 53".into()));
-
-        let ret = d.expand_keys().unwrap();
-        //assert_eq!(ret, Vec::<String>::new());
-
-        // dbg!(&d);
+        d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "TEST"), Some(" 5377".into()));
     }
@@ -1006,8 +997,6 @@ OVERRIDES = "a"
 P:inactive = ":)"
             "#,
         );
-        //dbg!(&d);
-        //assert!(get_var!(&d, "P").is_none());
         assert_eq!(get_var!(&d, "P:inactive").unwrap(), ":)");
     }
 
@@ -1115,7 +1104,6 @@ P:O:append = "!"
 OVERRIDES = "O"
             "#,
         );
-        //assert_eq!(get_var!(&d, "P").unwrap(), "t!");
         assert!(get_var!(&d, "P:notexist").is_none());
         assert_eq!(get_var!(&d, "P:O").unwrap(), "t!");
     }
@@ -1129,8 +1117,6 @@ Q:${IN} = "t"
 IN = "please"
             "#,
         );
-        //assert_eq!(get_var!(&d, "Q").unwrap(), "q");
-
         d.expand_keys().unwrap();
 
         assert_eq!(get_var!(&d, "Q:please").unwrap(), "t");
@@ -1171,8 +1157,6 @@ MY_VAR:a:append = "!"
 MY_VAR:append:a = "?"
         "#,
         );
-
-        d.dump("/tmp/after.dot");
 
         assert_eq!(get_var!(&d, "MY_VAR").unwrap(), "base");
         assert_eq!(get_var!(&d, "MY_VAR:a").unwrap(), "different!");

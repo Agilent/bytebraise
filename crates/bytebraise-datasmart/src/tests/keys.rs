@@ -14,18 +14,6 @@ TEST:${B} = "WAT"
 }
 
 #[test]
-fn basic_keys_2() {
-    let d = eval(
-        r#"
-TEST:${B} = "WAT"
-"#,
-    );
-
-    let keys = d.get_all_keys();
-    assert_eq!(keys, vec!["TEST:${B}"]);
-}
-
-#[test]
 fn decompose_overrides_1() {
     let d = eval(
         r#"

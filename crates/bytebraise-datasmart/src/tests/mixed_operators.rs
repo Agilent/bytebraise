@@ -54,9 +54,6 @@ TEST:remove ??= "test"
 }
 
 #[test]
-fn remove_weak_default_2() {}
-
-#[test]
 fn remove_dot() {
     let d = eval(
         r#"

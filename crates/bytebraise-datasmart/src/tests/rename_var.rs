@@ -47,9 +47,7 @@ TEST:a = "3"
     "#,
     );
 
-    d.dump("/tmp/before.dot");
     d.rename_var("TEST:a", "WAT:a").unwrap();
-    d.dump("/tmp/after.dot");
 
     let p = d.get_all_keys();
     assert_eq!(p, vec!["WAT:a", "WAT:a:b", "WAT:a:b:c"]);
@@ -76,11 +74,7 @@ OVERRIDES = "a:b"
     "#,
     );
 
-    eprintln!();
     d.rename_var("TEST", "WAT").unwrap();
-    eprintln!();
-
-    d.dump("/tmp/after.dot");
 
     let p = d.get_all_keys();
     assert_eq!(p, vec!["OVERRIDES", "WAT", "WAT:a", "WAT:a:b", "WAT:a:b:c"]);
@@ -135,8 +129,6 @@ TEST:${A} = "A"
     "#,
     );
 
-    dbg!(&d);
-
     d.rename_var("TEST:${A}", "TEST:append").unwrap();
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "A");
@@ -151,8 +143,6 @@ TES${A} = "A"
 A = "T:append"
     "#,
     );
-
-    dbg!(&d);
 
     d.expand_keys().unwrap();
 
@@ -171,8 +161,6 @@ B = "ST:appen"
     "#,
     );
 
-    dbg!(&d);
-
     d.expand_keys().unwrap();
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "bCA");
@@ -187,8 +175,6 @@ TEST:${A} = "A"
 A = "append"
     "#,
     );
-
-    dbg!(&d);
 
     d.expand_keys().unwrap();
 
@@ -208,8 +194,6 @@ B = "T:append"
 C = "ST:appen"
     "#,
     );
-
-    dbg!(&d);
 
     d.expand_keys().unwrap();
 
@@ -231,8 +215,6 @@ C = "ST:appen"
 T = "T"
     "#,
     );
-
-    dbg!(&d);
 
     d.expand_keys().unwrap();
 
@@ -256,8 +238,6 @@ T = "T"
     "#,
     );
 
-    dbg!(&d);
-
     d.expand_keys().unwrap();
 
     assert_eq!(get_var!(&d, "TEST").unwrap(), "baseCBA");
@@ -272,8 +252,6 @@ TES${T}:append = "2"
 T = "T"
     "#,
     );
-
-    dbg!(&d);
 
     d.expand_keys().unwrap();
 
@@ -308,8 +286,6 @@ OVERRIDES = "a"
 
     d.expand_keys().unwrap();
 
-    dbg!(&d);
-
     assert_eq!(get_var!(&d, "TEST").unwrap(), "2");
 }
 
@@ -325,7 +301,6 @@ OVERRIDES = "a"
     );
 
     d.expand_keys().unwrap();
-    d.dump("/tmp/after.dot");
 
     assert_eq!(get_var!(&d, "TEST:q").unwrap(), "2");
 }
