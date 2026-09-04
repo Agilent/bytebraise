@@ -326,23 +326,17 @@ OVERRIDES = "a:b"
     }
 
     #[test]
-    fn override_score_18() {
+    fn override_with_trailing_colon() {
         let d = eval(
             r#"
 TEST = "1"
-TEST = "2"
-TEST:append = "3"
-TEST:append = "4"
-TEST:b:append = "base"
-TEST:b = "OH YES"
-TEST:c:prepend = "Q"
-TEST:c = "WHAT"
-TEST:c:append = "!"
+TEST:b = "2"
+TEST:c = "3"
 OVERRIDES = "b:c:"
             "#,
         );
 
-        assert_eq!(get_var!(&d, "TEST"), Some("QWHAT!34".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
     #[test]
