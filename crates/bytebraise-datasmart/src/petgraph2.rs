@@ -193,54 +193,6 @@ impl DataSmart {
         val
     }
 
-    pub fn plus_equals_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::PlusEqual);
-    }
-
-    pub fn equals_plus_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::EqualPlus);
-    }
-
-    pub fn equals_dot_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::EqualDot);
-    }
-
-    pub fn dot_equals_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::DotEqual);
-    }
-
-    pub fn weak_default_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::WeakDefault);
-    }
-
-    pub fn default_var<T: Into<String> + Debug, S: Into<String> + Debug>(
-        &mut self,
-        var: T,
-        value: S,
-    ) {
-        set_var_ex!(self, var, value, operator = NormalOperator::Default);
-    }
-
     #[tracing::instrument(skip(self), ret)]
     pub(crate) fn set_var_ex<T: Into<String> + Debug, S: Into<String> + Debug>(
         &mut self,
