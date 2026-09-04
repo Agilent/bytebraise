@@ -386,6 +386,7 @@ OVERRIDES = "a:b:c"
         assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
 
+    #[test]
     fn override_priority_order_3() {
         let d = eval(
             r#"
@@ -402,6 +403,7 @@ OVERRIDES = "a:b:c"
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
 
+    #[test]
     fn override_priority_order_4() {
         let d = eval(
             r#"
@@ -676,97 +678,118 @@ A = "append"
 
     #[test]
     fn plus_equals() {
-        let mut d = eval(
+        let d = eval(
             r#"
 TEST = "base"
+TEST += "2"
             "#,
         );
-        d.plus_equals_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("base 2".into()));
     }
 
     #[test]
     fn plus_equals_no_base() {
-        let mut d = DataSmart::new();
-        d.plus_equals_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST += "2"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some(" 2".into()));
     }
 
     #[test]
     fn dot_equals() {
-        let mut d = eval(
+        let d = eval(
             r#"
 TEST = "base"
+TEST .= "2"
             "#,
         );
-        d.dot_equals_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("base2".into()));
     }
 
     #[test]
     fn dot_equals_no_base() {
-        let mut d = DataSmart::new();
-        d.dot_equals_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST .= "2"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
     fn equals_plus() {
-        let mut d = eval(
+        let d = eval(
             r#"
 TEST = "base"
+TEST =+ "2"
             "#,
         );
-        d.equals_plus_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("2 base".into()));
     }
 
     #[test]
     fn equals_plus_no_base() {
-        let mut d = DataSmart::new();
-        d.equals_plus_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST =+ "2"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some("2 ".into()));
     }
 
     #[test]
     fn equals_dot() {
-        let mut d = eval(
+        let d = eval(
             r#"
 TEST = "base"
+TEST =. "2"
             "#,
         );
-        d.equals_dot_var("TEST", "2");
         assert_eq!(get_var!(&d, "TEST"), Some("2base".into()));
     }
 
     #[test]
     fn equals_dot_no_base() {
-        let mut d = DataSmart::new();
-        d.dot_equals_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST =. "2"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
     fn weak_default() {
-        let mut d = DataSmart::new();
-        d.weak_default_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST ??= "2"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }
 
     #[test]
     fn weak_default_2() {
-        let mut d = DataSmart::new();
-        d.weak_default_var("TEST", "2");
-        d.weak_default_var("TEST", "3");
-        d.weak_default_var("TEST", "4");
+        let d = eval(
+            r#"
+TEST ??= "2"
+TEST ??= "3"
+TEST ??= "4"
+            "#,
+        );
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 
     #[test]
     fn weak_default_doc_example() {
-        let mut d = DataSmart::new();
-        d.weak_default_var("W", "x");
-        d.plus_equals_var("W", "y");
+        let d = eval(
+            r#"
+W ??= "x"
+W += "y"
+            "#,
+        );
         assert_eq!(get_var!(&d, "W"), Some(" y".into()));
 
         let d = eval(
@@ -874,40 +897,45 @@ OVERRIDES = "a:b:c"
 
     #[test]
     fn default_var() {
-        let mut d = DataSmart::new();
-
-        d.default_var("TEST", "1");
+        let d = eval(
+            r#"
+TEST ?= "1"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
 
-        let mut d = DataSmart::new();
-
-        d.default_var("TEST", "1");
-        d.default_var("TEST", "2");
+        let d = eval(
+            r#"
+TEST ?= "1"
+TEST ?= "2"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
     fn default_precedence() {
-        let mut d = DataSmart::new();
-
-        d.weak_default_var("TEST", "2");
-        d.default_var("TEST", "1");
+        let d = eval(
+            r#"
+TEST ??= "2"
+TEST ?= "1"
+            "#,
+        );
 
         assert_eq!(get_var!(&d, "TEST"), Some("1".into()));
     }
 
     #[test]
     fn weak_default_precedence() {
-        let mut d = eval(
+        let d = eval(
             r#"
+TEST:a ??= "2"
+TEST ?= "1"
 OVERRIDES = "a:b:c"
             "#,
         );
-
-        d.weak_default_var("TEST:a", "2");
-        d.default_var("TEST", "1");
 
         assert_eq!(get_var!(&d, "TEST"), Some("2".into()));
     }

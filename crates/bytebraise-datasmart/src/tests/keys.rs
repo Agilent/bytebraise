@@ -3,7 +3,7 @@ use crate::evaluate::eval;
 
 #[test]
 fn basic_keys_1() {
-    let mut d = eval(
+    let d = eval(
         r#"
 TEST:${B} = "WAT"
 "#,
@@ -15,7 +15,7 @@ TEST:${B} = "WAT"
 
 #[test]
 fn basic_keys_2() {
-    let mut d = eval(
+    let d = eval(
         r#"
 TEST:${B} = "WAT"
 "#,
@@ -27,7 +27,7 @@ TEST:${B} = "WAT"
 
 #[test]
 fn decompose_overrides_1() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -38,7 +38,7 @@ B:c:${Q} = "test"
     assert_eq!(keys, vec!["B:c:${Q}", "B:c:d"]);
 
     // When overrides are active, the story changes:
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -51,7 +51,7 @@ OVERRIDES = "c:d"
     assert_eq!(keys, vec!["B", "B:c", "B:c:${Q}", "B:c:d", "OVERRIDES"]);
 
     // Also:
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -64,7 +64,7 @@ OVERRIDES = "d"
     assert_eq!(keys, vec!["B:c", "B:c:${Q}", "B:c:d", "OVERRIDES"]);
 
     // And:
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -79,7 +79,7 @@ OVERRIDES = "c"
 
 #[test]
 fn decompose_overrides_2() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -89,7 +89,7 @@ B:c:${Q} = "test"
     let keys = d.get_all_keys();
     assert_eq!(keys, vec!["B:c:${Q}", "B:c:d"]);
 
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -100,7 +100,7 @@ OVERRIDES = "c"
     let keys = d.get_all_keys();
     assert_eq!(keys, vec!["B:c:${Q}", "B:c:d", "OVERRIDES"]);
 
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 # In BitBake, overrides internally are purely [A-Z] characters, so :${Q} is not recorded as an override
@@ -118,7 +118,7 @@ OVERRIDES = "${Q}"
 fn decompose_overrides_3() {
     // But ${Q} as override doesn't result in B:c being valid:
     // TODO explain why
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q} = "test"
@@ -130,7 +130,7 @@ OVERRIDES = "c:${Q}"
     // Neither B nor B:c has a value, since 'd' is not active
     assert_eq!(keys, vec!["B:c:${Q}", "B:c:d", "OVERRIDES"]);
 
-    let mut d = eval(
+    let d = eval(
         r#"
 B:c:d = "test"
 B:c:${Q}:p:d = "test"
@@ -147,7 +147,7 @@ OVERRIDES = "d"
 
 #[test]
 fn operators_1() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B:append = "A"
 B = "Q"
@@ -161,7 +161,7 @@ B:append:q = "T"
 
 #[test]
 fn operators_2() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a = "Q"
@@ -175,7 +175,7 @@ B:a:b:append = "T"
 
 #[test]
 fn operators_3() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a:${Q}:append = "Q"
@@ -188,7 +188,7 @@ B:a:${Q}:append = "Q"
 
 #[test]
 fn operators_4() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a:${Q}:append = "Q"
@@ -210,7 +210,7 @@ OVERRIDES = "b"
         ]
     );
 
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a:${Q}:append = "Q"
@@ -236,7 +236,7 @@ OVERRIDES = "b:g"
 
 #[test]
 fn decompose_operators_1() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a:${Q}:append:${P} = "Q"

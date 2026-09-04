@@ -8,7 +8,7 @@ fn override_operator_filter_casing() {
     // which means that the bit after the operator (append/prepend/remove) can't contain
     // uppercase letters. If it does, then instead of creating a variable "B" with an 'append'
     // operation, we end up with a variable called "B:append:A".
-    let mut d = eval(
+    let d = eval(
         r#"
 B:append:A = "Q"
 "#,
@@ -18,7 +18,7 @@ B:append:A = "Q"
     assert_eq!(keys, vec!["B:append:A"]);
 
     // This also means you can't have variable refs, unless the variables are lowercase
-    let mut d = eval(
+    let d = eval(
         r#"
 B:append:${A} = "Q"
 C:append:${a} = "T"
@@ -31,7 +31,7 @@ C:append:${a} = "T"
 
 #[test]
 fn override_operator_get_keys_bitbake_bug() {
-    let mut d = eval(
+    let d = eval(
         r#"
 B = "A"
 B:a:${Q}:append:${P} = "Q"
