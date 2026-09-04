@@ -84,6 +84,32 @@ OVERRIDES = "foo"
     assert_eq!(d.get_all_keys(), vec!["OVERRIDES", "bar", "bar:foo"]);
 }
 
+#[test]
+fn rename_to_operation_treats_trailing_scope_as_filter() {
+    for (operator, value, inactive, active) in [
+        ("append", " three", "one two", "one two three"),
+        ("prepend", "zero ", "one two", "zero one two"),
+        ("remove", "two", "one two", "one "),
+    ] {
+        for (overrides, expected) in [("", inactive), ("b", active)] {
+            let mut d = eval(format!(
+                r#"
+TEST:a = "one two"
+TEST:a:b = "{value}"
+OVERRIDES = "{overrides}"
+    "#
+            ));
+
+            d.rename_var("TEST:a", format!("WAT:{operator}")).unwrap();
+
+            assert_eq!(get_var!(&d, "WAT").unwrap(), expected);
+            // The descendant is filtered by global OVERRIDES; a direct variant lookup
+            // must not activate it by treating b as an operation scope.
+            assert_eq!(get_var!(&d, "WAT:b"), None);
+        }
+    }
+}
+
 #[test_log::test]
 fn basic_2() {
     let mut d = eval(

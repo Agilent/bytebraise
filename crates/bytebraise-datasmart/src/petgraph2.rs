@@ -519,14 +519,10 @@ impl DataSmart {
         let old_base = &old_parsed.var_base;
         let new_base = &new_parsed.var_base;
 
-        let old_target_scope = old_parsed.override_scope();
-
         let old_var_index = match self.vars.get(old_base) {
             Some(&idx) => idx,
             None => return Ok(()),
         };
-
-        // TODO: rewrite this
 
         // --- PHASE 1: Collect and Explicitly Isolate Edge IDs (Immutable Read) ---
         let mut edges_to_move = Vec::new();
@@ -537,10 +533,10 @@ impl DataSmart {
             .detach();
         while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx)
-                && stmt.lhs.override_scope().starts_with(&old_target_scope)
+                && let Some(new_lhs) = stmt.lhs.replace_assignment_prefix(&old_parsed, &new_parsed)
             {
                 let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
-                edges_to_move.push((edge_idx, target_node_idx, op_metadata));
+                edges_to_move.push((edge_idx, target_node_idx, op_metadata, new_lhs));
             }
         }
 
@@ -564,71 +560,14 @@ impl DataSmart {
             }
         };
 
-        // --- PHASE 3: Mutate Statement Internals & Re-Shape ---
-        let mut moving_a_base_assignment = false;
+        // --- PHASE 3: Apply the Precomputed Statement Rewrites ---
+        let moving_a_base_assignment = edges_to_move.iter().any(
+            |(_, _, _, new_lhs)| matches!(&new_lhs.kind, Assignment { scope } if scope.is_empty()),
+        );
 
-        for (_, stmt_idx, _) in &edges_to_move {
+        for (_, stmt_idx, _, new_lhs) in &edges_to_move {
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
-                eprintln!("original statement {stmt:?}");
-
-                // 1. Update the base variable base name natively
-                stmt.lhs.var_base = new_base.clone();
-
-                // 2. Adjust scopes dynamically without blindly discarding the layout 'kind'
-                match &mut stmt.lhs.kind {
-                    Assignment { scope } => {
-                        let trailing_scope = scope.split_off(old_target_scope.len());
-
-                        match &new_parsed.kind {
-                            Assignment { scope: new_scope } => {
-                                let mut updated_scope = new_scope.clone();
-                                updated_scope.extend(trailing_scope);
-                                *scope = updated_scope;
-
-                                // If the resulting full expression maps to a plain base assignment (no overrides left),
-                                // it means BitBake's setVar semantic will clobber any existing base value on the target node.
-                                if scope.is_empty() {
-                                    moving_a_base_assignment = true;
-                                }
-                            }
-                            OverrideOperation {
-                                scope: new_scope,
-                                operator,
-                                filter,
-                            } => {
-                                // If the expanded baseline introduces an operator, transmute the structure
-                                let mut updated_scope = new_scope.clone();
-                                updated_scope.extend(trailing_scope);
-                                stmt.lhs.kind = OverrideOperation {
-                                    scope: updated_scope,
-                                    operator: *operator,
-                                    filter: filter.clone(),
-                                };
-                            }
-                        }
-                    }
-                    OverrideOperation { scope, .. } => {
-                        // FIXES THE TODO: Keep the existing OverrideOperation layout intact!
-                        let trailing_scope = scope.split_off(old_target_scope.len());
-
-                        match &new_parsed.kind {
-                            Assignment { scope: new_scope } => {
-                                // Just prepend the new prefix scope fragments from new_parsed
-                                let mut updated_scope = new_scope.clone();
-                                updated_scope.extend(trailing_scope);
-                                *scope = updated_scope;
-                            }
-                            OverrideOperation {
-                                scope: new_scope, ..
-                            } => {
-                                let mut updated_scope = new_scope.clone();
-                                updated_scope.extend(trailing_scope);
-                                *scope = updated_scope;
-                            }
-                        }
-                    }
-                }
-                eprintln!("mutated statement {:?}", stmt);
+                stmt.lhs = new_lhs.clone();
             }
         }
 
@@ -658,14 +597,11 @@ impl DataSmart {
         }
 
         // --- PHASE 4: Graph Topology Updates (With Edge Type Synchronization) ---
-        for (edge_idx, stmt_idx, mut op_metadata) in edges_to_move {
+        for (edge_idx, stmt_idx, mut op_metadata, _) in edges_to_move {
             self.ds.remove_edge(edge_idx);
 
             if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(stmt_idx) {
-                op_metadata.op_type = match &stmt.lhs.kind {
-                    Assignment { .. } => op_metadata.op_type,
-                    OverrideOperation { operator, .. } => Operator::from(*operator),
-                };
+                op_metadata.op_type = stmt.resolved_operator();
             }
 
             op_metadata.sequence_id = self.statement_id;

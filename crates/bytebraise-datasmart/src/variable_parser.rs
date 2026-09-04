@@ -56,6 +56,63 @@ impl VariableExpression {
     pub(crate) fn override_scope(&self) -> &[String] {
         self.kind.override_scope()
     }
+
+    pub(crate) fn replace_assignment_prefix(
+        &self,
+        old: &VariableExpression,
+        new: &VariableExpression,
+    ) -> Option<VariableExpression> {
+        let Assignment { scope: old_scope } = &old.kind else {
+            return None;
+        };
+        if self.var_base != old.var_base || !self.override_scope().starts_with(old_scope) {
+            return None;
+        }
+
+        let trailing_scope = &self.override_scope()[old_scope.len()..];
+        let kind = match (&self.kind, &new.kind) {
+            (Assignment { .. }, Assignment { scope }) => Assignment {
+                scope: scope.iter().chain(trailing_scope).cloned().collect(),
+            },
+            (
+                Assignment { .. },
+                OverrideOperation {
+                    scope,
+                    operator,
+                    filter,
+                },
+            ) => OverrideOperation {
+                scope: scope.clone(),
+                operator: *operator,
+                filter: filter.iter().chain(trailing_scope).cloned().collect(),
+            },
+            (
+                OverrideOperation {
+                    operator, filter, ..
+                },
+                Assignment { scope },
+            ) => OverrideOperation {
+                scope: scope.iter().chain(trailing_scope).cloned().collect(),
+                operator: *operator,
+                filter: filter.clone(),
+            },
+            (
+                OverrideOperation {
+                    operator, filter, ..
+                },
+                OverrideOperation { scope, .. },
+            ) => OverrideOperation {
+                scope: scope.iter().chain(trailing_scope).cloned().collect(),
+                operator: *operator,
+                filter: filter.clone(),
+            },
+        };
+
+        Some(VariableExpression {
+            var_base: new.var_base.clone(),
+            kind,
+        })
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -368,6 +425,30 @@ mod test {
         assert_eq!(
             parse_variable("B:a:${q}:t:append:${p}:p"),
             v!("B", scope = "a:${q}:t", append, filter = "${p}:p")
+        );
+    }
+
+    #[test]
+    fn replace_assignment_prefix() {
+        let old = parse_variable("TEST:a");
+
+        assert_eq!(
+            parse_variable("TEST:a:b").replace_assignment_prefix(&old, &parse_variable("WAT:t")),
+            Some(parse_variable("WAT:t:b"))
+        );
+        assert_eq!(
+            parse_variable("TEST:a:b")
+                .replace_assignment_prefix(&old, &parse_variable("WAT:t:append:q")),
+            Some(parse_variable("WAT:t:append:q:b"))
+        );
+        assert_eq!(
+            parse_variable("TEST:a:b:prepend:q")
+                .replace_assignment_prefix(&old, &parse_variable("WAT:t")),
+            Some(parse_variable("WAT:t:b:prepend:q"))
+        );
+        assert_eq!(
+            parse_variable("OTHER:a:b").replace_assignment_prefix(&old, &parse_variable("WAT:t")),
+            None
         );
     }
 }
