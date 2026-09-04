@@ -407,6 +407,50 @@ OVERRIDES = "a:b:c"
 
         assert_eq!(get_var!(&d, "TEST"), Some("3".into()));
     }
+
+    #[test]
+    fn override_selection_prefers_a_later_collapse_pass() {
+        let d = eval(
+            r#"
+TEST:b = "b"
+TEST:a:a = "a:a"
+OVERRIDES = "a:b"
+            "#,
+        );
+
+        assert_eq!(get_var!(&d, "TEST"), Some("a:a".into()));
+    }
+
+    #[test]
+    fn override_reduction_collision_uses_insertion_order() {
+        let d = eval(
+            r#"
+TEST:a:a:a = "first"
+TEST:a:a = "second"
+OVERRIDES = "a"
+            "#,
+        );
+        assert_eq!(get_var!(&d, "TEST"), Some("second".into()));
+
+        let d = eval(
+            r#"
+TEST:a:a = "first"
+TEST:a:a:a = "second"
+OVERRIDES = "a"
+            "#,
+        );
+        assert_eq!(get_var!(&d, "TEST"), Some("second".into()));
+
+        let d = eval(
+            r#"
+TEST:a:a:a = "first"
+TEST:a:a = "second"
+TEST:a:a:a = "updated"
+OVERRIDES = "a"
+            "#,
+        );
+        assert_eq!(get_var!(&d, "TEST"), Some("updated".into()));
+    }
     #[test]
     fn override_selection_order_sensitivity() {
         let d = eval(

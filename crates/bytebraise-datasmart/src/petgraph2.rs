@@ -34,7 +34,7 @@ use bytebraise_util::fifo_heap::FifoHeap;
 use bytebraise_util::retain_with_index::RetainWithIndex;
 use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
 use fxhash::FxHashMap;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -83,6 +83,57 @@ pub struct DataSmart {
 }
 
 pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
+
+// BitBake reduces all active override variants together. Distinct scopes can collapse to the same
+// key, so insertion order and replacement behavior are part of selection semantics.
+fn select_override_scope(variable: &Variable, active_overrides: &IndexSet<String>) -> Vec<String> {
+    let mut active = IndexMap::<Vec<String>, Vec<String>>::new();
+
+    for statement in &variable.statements {
+        let scope = statement.lhs.override_scope();
+        if !scope.is_empty()
+            && scope
+                .iter()
+                .all(|override_name| active_overrides.contains(override_name))
+        {
+            active.insert(scope.to_vec(), scope.to_vec());
+        }
+    }
+
+    let mut selected = Vec::new();
+    let mut modified = true;
+    while modified {
+        modified = false;
+
+        for active_override in active_overrides {
+            let scopes = active.keys().cloned().collect_vec();
+            for scope in scopes {
+                if scope.len() > 1 && scope.last() == Some(active_override) {
+                    let Some(original_scope) = active.shift_remove(&scope) else {
+                        continue;
+                    };
+                    let reduced_scope = scope
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, part)| *index == 0 || *part != active_override)
+                        .map(|(_, part)| part)
+                        .cloned()
+                        .collect();
+                    // IndexMap, like Python's dict, replaces an existing value without moving its
+                    // key. A newly reduced key is appended instead.
+                    active.insert(reduced_scope, original_scope);
+                    modified = true;
+                } else if scope.as_slice() == std::slice::from_ref(active_override)
+                    && let Some(original_scope) = active.shift_remove(&scope)
+                {
+                    selected = original_scope;
+                }
+            }
+        }
+    }
+
+    selected
+}
 
 // For OVERRIDES = "a:b:c",
 //
@@ -611,20 +662,26 @@ impl DataSmart {
         };
 
         let variable = self.ds.node_weight(*var_entry).unwrap();
+        let selected_scope = if var_suffix.is_empty() {
+            select_override_scope(variable, &override_selection_context)
+        } else {
+            var_suffix.clone()
+        };
 
-        // Calculate override scores for operations
+        // The winning scope is selected globally above. Scores only order the operations that
+        // belong to that scope and the unqualified deferred operations that also apply to it.
         let mut resolved_variable_operations: FifoHeap<ScoredOperation> = variable
             .statements
             .iter()
             .enumerate()
             .filter_map(|(stmt_index, statement)| {
-                if !var_suffix.is_empty() {
-                    let stmt_scope = statement.lhs.kind.override_scope();
-
-                    // Use exact slice equality so "a:append" (scope=["a"]) matches your lookup "MY_VAR:a" (var_suffix=["a"])
-                    if stmt_scope != var_suffix.as_slice() {
-                        return None;
-                    }
+                let stmt_scope = statement.lhs.kind.override_scope();
+                if stmt_scope != selected_scope.as_slice()
+                    && !(var_suffix.is_empty()
+                        && statement.is_override_operation()
+                        && stmt_scope.is_empty())
+                {
+                    return None;
                 }
 
                 // If in parsing mode, filter out override operators
