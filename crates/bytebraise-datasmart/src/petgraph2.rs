@@ -447,9 +447,20 @@ impl DataSmart {
         }
 
         let ret = todolist.keys().cloned().sorted().collect_vec();
-        for o in todolist.into_iter() {
-            eprintln!("rename {} to {}", o.0, o.1);
-            self.rename_var(o.0, o.1)?;
+        while !todolist.is_empty() {
+            let old = todolist
+                .keys()
+                .find(|key| {
+                    let descendant_prefix = format!("{key}:");
+                    !todolist
+                        .keys()
+                        .any(|candidate| candidate.starts_with(&descendant_prefix))
+                })
+                .unwrap()
+                .clone();
+            let new = todolist.remove(&old).unwrap();
+            eprintln!("rename {old} to {new}");
+            self.rename_var(old, new)?;
         }
 
         // Sanity check: did we actually expand everything?

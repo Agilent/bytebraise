@@ -1,5 +1,44 @@
 #[cfg(test)]
 use crate::evaluate::eval;
+#[cfg(test)]
+use crate::macros::get_var;
+
+#[test]
+fn override_names_with_non_alphanumeric_suffixes() {
+    let d = eval(
+        r#"
+TEST = "base"
+TEST:some_val = "underscore"
+TEST2 = "base"
+TEST2:class-target = "hyphen"
+OVERRIDES = "some_val:class-target"
+"#,
+    );
+
+    assert_eq!(get_var!(&d, "TEST"), Some("underscore".into()));
+    assert_eq!(get_var!(&d, "TEST2"), Some("hyphen".into()));
+}
+
+#[test]
+fn override_names_resolved_by_key_expansion() {
+    let mut d = eval(
+        r#"
+TARGET_ARCH = "x86_64"
+PN = "gizmo-${TARGET_ARCH}"
+VERSION = "1"
+VERSION:pn-${PN} = "2"
+TEST:${PN} = "base"
+TEST:${PN}:append:pn-gizmo-${MACHINE} = " appended"
+MACHINE = "qemux86"
+OVERRIDES = "gizmo-x86_64:pn-gizmo-x86_64:pn-gizmo-qemux86"
+"#,
+    );
+
+    d.expand_keys().unwrap();
+
+    assert_eq!(get_var!(&d, "VERSION"), Some("2".into()));
+    assert_eq!(get_var!(&d, "TEST"), Some("base appended".into()));
+}
 
 #[test]
 fn override_operator_filter_casing() {

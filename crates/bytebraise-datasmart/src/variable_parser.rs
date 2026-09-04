@@ -7,12 +7,12 @@ use std::borrow::Cow;
 use std::sync::LazyLock;
 
 static BITBAKE_OVERRIDE_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-z0-9]+$").unwrap());
+    LazyLock::new(|| Regex::new(r"^[a-z0-9]+").unwrap());
 
-static OVERRIDE_STR_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[^A-Z]*$").unwrap());
-
-static KEYWORD_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|:)(?P<keyword>append|prepend|remove)(?:$|:)").unwrap());
+static SETVAR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)(?::(?P<add>[^A-Z]*))?$")
+        .unwrap()
+});
 
 /// Statement parsing resolves the kind of variable expression (LHS), which also has an effect on the
 /// recorded value (RHS), depending on combinations of operators.
@@ -191,77 +191,56 @@ impl VariableExpressionKind {
 pub(crate) fn parse_variable<V: AsRef<str>>(var: V) -> VariableExpression {
     let var = var.as_ref();
 
-    let mut parts = var.split(':');
+    if let Some(captures) = SETVAR_REGEX.captures(var) {
+        let base = captures.name("base").unwrap().as_str();
+        let parts = base.split(':').collect_vec();
+        let scope_start = parts
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(index, part)| BITBAKE_OVERRIDE_REGEX.is_match(part).then_some(index))
+            .unwrap_or(parts.len());
+        let operator = match captures.name("keyword").unwrap().as_str() {
+            ":append" => OverrideOperator::Append,
+            ":prepend" => OverrideOperator::Prepend,
+            ":remove" => OverrideOperator::Remove,
+            _ => unreachable!(),
+        };
+        let filter = captures
+            .name("add")
+            .into_iter()
+            .flat_map(|value| value.as_str().split(':'))
+            .filter(|part| !part.is_empty())
+            .map(String::from)
+            .collect();
 
-    // Base has at least one part. It has more parts in cases like:
-    //   A:B = "V"
-    // since :B is not a valid override str.
-    //
-    let mut i = 0;
-    let base_parts = parts
-        .take_while_ref(|part| {
-            let ret = i == 0 || !BITBAKE_OVERRIDE_REGEX.is_match(part);
-            i += 1;
-            ret
-        })
-        .join(":");
-
-    // See if an override operator is amongst the remainder
-    // If so, then parts leading up to the operator become the 'scope', and parts after the 'filter'
-    let mut remainder = parts.clone();
-    if let Some(operator) =
-        remainder.position(|part| matches!(part, "remove" | "append" | "prepend"))
-    {
-        // Check whether all parts after the operator are valid. (This is to match the behavior of
-        // the original bitbake __setvar_regexp__ regex).
-        if remainder.all(|part| OVERRIDE_STR_REGEX.is_match(part)) {
-            // Consume the scope
-            let scope = parts
-                .by_ref()
-                .take(operator)
-                .map(String::from)
-                .collect_vec();
-
-            // Consume operator
-            let operator = parts.next().unwrap();
-
-            // Consume filter
-            let filter = parts.map(String::from).collect();
-            return VariableExpression {
-                var_base: base_parts,
-                kind: OverrideOperation {
-                    scope,
-                    operator: match operator {
-                        "append" => OverrideOperator::Append,
-                        "prepend" => OverrideOperator::Prepend,
-                        "remove" => OverrideOperator::Remove,
-                        _ => unreachable!(),
-                    },
-                    filter,
-                },
-            };
-        }
+        return VariableExpression {
+            var_base: parts[..scope_start].join(":"),
+            kind: OverrideOperation {
+                scope: parts[scope_start..]
+                    .iter()
+                    .map(|part| String::from(*part))
+                    .collect(),
+                operator,
+                filter,
+            },
+        };
     }
 
-    // For leftover parts, iterate backwards and take override strings as we can (as scope).
-    // Whatever is left after that is tacked onto the base.
-    let mut rparts = parts.rev();
-    let mut scope = rparts
-        .take_while_ref(|part| BITBAKE_OVERRIDE_REGEX.is_match(part))
-        .map(String::from)
-        .collect_vec();
-    scope.reverse();
-
-    let remainder = rparts.rev().join(":");
-    let var_base = if remainder.is_empty() {
-        base_parts
-    } else {
-        format!("{base_parts}:{remainder}")
-    };
+    let parts = var.split(':').collect_vec();
+    let scope_start = parts[1..]
+        .iter()
+        .rposition(|part| !BITBAKE_OVERRIDE_REGEX.is_match(part))
+        .map_or(1, |index| index + 2);
 
     VariableExpression {
-        var_base,
-        kind: Assignment { scope },
+        var_base: parts[..scope_start].join(":"),
+        kind: Assignment {
+            scope: parts[scope_start..]
+                .iter()
+                .map(|part| String::from(*part))
+                .collect(),
+        },
     }
 }
 
@@ -372,6 +351,18 @@ mod test {
         assert_eq!(parse_variable("A:a"), v!("A", scope = "a"));
         assert_eq!(parse_variable("A:A:a"), v!("A:A", scope = "a"));
         assert_eq!(
+            parse_variable("ALTERNATIVE:ncurses-tools:class-target"),
+            v!("ALTERNATIVE", scope = "ncurses-tools:class-target")
+        );
+        assert_eq!(
+            parse_variable("TEST:some_val"),
+            v!("TEST", scope = "some_val")
+        );
+        assert_eq!(
+            parse_variable("VERSION:pn-${PN}"),
+            v!("VERSION", scope = "pn-${PN}")
+        );
+        assert_eq!(
             parse_variable("A:A:append:a"),
             v!("A:A", append, filter = "a")
         );
@@ -388,6 +379,19 @@ mod test {
             v!("A:A", scope = "a:b", append, filter = "a:b")
         );
         assert_eq!(parse_variable("A:append:a"), v!("A", append, filter = "a"));
+        assert_eq!(
+            parse_variable("A:append:X:prepend:y"),
+            v!("A", scope = "append:X", prepend, filter = "y")
+        );
+        assert_eq!(parse_variable("A:append:"), v!("A", append));
+        assert_eq!(
+            parse_variable("TEST:${PN}:append:pn-gizmo-${MACHINE}"),
+            v!("TEST:${PN}", scope = "append:pn-gizmo-${MACHINE}")
+        );
+        assert_eq!(
+            parse_variable("TEST:gizmo:append:pn-gizmo-qemux86"),
+            v!("TEST", scope = "gizmo", append, filter = "pn-gizmo-qemux86")
+        );
 
         assert_eq!(
             parse_variable("A:A:t:p:${P}:t:p"),
