@@ -17,6 +17,23 @@ TEST = "A"
 }
 
 #[test]
+fn rename_preserves_operation_order_at_existing_destination() {
+    let mut d = eval(
+        r#"
+OLD = "source"
+OLD:append = "-source"
+NEW = "destination"
+NEW:append = "-destination"
+    "#,
+    );
+
+    d.rename_var("OLD", "NEW").unwrap();
+
+    assert_eq!(get_var!(&d, "OLD"), None);
+    assert_eq!(get_var!(&d, "NEW").unwrap(), "source-destination-source");
+}
+
+#[test]
 fn operator_sources_are_not_renamed() {
     for old in [
         "TEST:append",

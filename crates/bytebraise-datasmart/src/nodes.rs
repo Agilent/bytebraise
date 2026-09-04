@@ -2,15 +2,16 @@ use crate::petgraph2::OverrideScore;
 use crate::variable_operation::VariableOperation;
 use crate::variable_parser::StatementNode2;
 use bytebraise_util::fifo_heap::FifoHeap;
-use petgraph::graph::NodeIndex;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub(crate) struct Variable {
     pub(crate) name: String,
+    // Canonical statement order. Evaluation derives its priority heap from this sequence.
+    pub(crate) statements: Vec<StatementNode2>,
     pub(crate) cached_value: RefCell<Option<String>>,
     // map of varflag name => heap of operations
     // for example, in:
@@ -29,65 +30,20 @@ pub(crate) struct Variable {
     pub(crate) varflags: BTreeMap<String, FifoHeap<VariableOperation>>, // TODO: iterative cache for OVERRIDES
 }
 
-#[derive(Debug)]
-pub(crate) enum GraphItem {
-    Variable(Variable),
-    StmtNode(StatementNode2),
-}
-
-impl Display for GraphItem {
+impl Display for Variable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            GraphItem::Variable(var) => f.write_str(&var.name),
-            GraphItem::StmtNode(stmt) => f.write_str(&format!("{:#?}", stmt)),
-        }
+        f.write_str(&self.name)
     }
 }
 
-impl GraphItem {
-    pub(crate) fn variable_mut(&mut self) -> &mut Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
-        }
-    }
-
-    pub(crate) fn variable(&self) -> &Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
-        }
-    }
-
-    pub(crate) fn to_variable(self) -> Variable {
-        match self {
-            GraphItem::Variable(v) => v,
-            _ => panic!("Expected GraphItem::Variable"),
-        }
-    }
-
-    pub(crate) fn statement(&self) -> &StatementNode2 {
-        match self {
-            GraphItem::StmtNode(stmt) => stmt,
-            _ => panic!("Expected GraphItem::Statement"),
-        }
-    }
-
-    pub(crate) fn statement_mut(&mut self) -> &mut StatementNode2 {
-        match self {
-            GraphItem::StmtNode(stmt) => stmt,
-            _ => panic!("Expected GraphItem::Statement"),
-        }
-    }
-}
-
-impl GraphItem {
-    pub(crate) fn new_variable<T: Into<String>>(name: T) -> GraphItem {
-        GraphItem::Variable(Variable {
+impl Variable {
+    pub(crate) fn new<T: Into<String>>(name: T) -> Variable {
+        Variable {
             name: name.into(),
+            statements: Vec::new(),
             cached_value: RefCell::new(None),
             varflags: BTreeMap::new(),
-        })
+        }
     }
 }
 
@@ -95,7 +51,7 @@ impl GraphItem {
 pub struct ScoredOperation<'a> {
     pub(crate) score: OverrideScore,
     pub(crate) stmt: &'a StatementNode2,
-    pub(crate) stmt_index: NodeIndex,
+    pub(crate) stmt_index: usize,
 }
 
 impl<'a> Ord for ScoredOperation<'a> {

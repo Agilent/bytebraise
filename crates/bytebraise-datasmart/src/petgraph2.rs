@@ -25,8 +25,8 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::{get_var, set_var_ex};
-use crate::nodes::{GraphItem, ScoredOperation, Variable};
-use crate::variable_operation::{NormalOperator, Operator, OverrideOperator, VariableOperation};
+use crate::nodes::{ScoredOperation, Variable};
+use crate::variable_operation::{NormalOperator, Operator, OverrideOperator};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
 use crate::variable_parser::{parse_statement, parse_variable};
 use anyhow::bail;
@@ -36,12 +36,10 @@ use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
 use fxhash::FxHashMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use petgraph::Direction;
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
-use petgraph::prelude::{EdgeRef, StableGraph};
+use petgraph::prelude::StableGraph;
 use petgraph::stable_graph::DefaultIx;
-use petgraph::visit::IntoEdges;
 use regex::{Captures, Regex};
 use scopeguard::{ScopeGuard, defer, guard};
 use std::borrow::Cow;
@@ -50,7 +48,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -78,21 +75,11 @@ impl ExpansionState {
 
 #[derive(Debug)]
 pub struct DataSmart {
-    // TODO: edge type is Operator which is correct for Variable -> Statement edges
-    //  but will not work when we start adding Variable -> Variable edges (for caching)
-    ds: StableGraph<GraphItem, EdgeOperation>,
+    ds: StableGraph<Variable, ()>,
     vars: FxHashMap<String, NodeIndex<DefaultIx>>,
     expand_state: RefCell<Option<ExpansionState>>,
     active_overrides: RefCell<Option<IndexSet<String>>>,
     inside_compute_overrides: RefCell<()>,
-
-    statement_id: usize,
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub struct EdgeOperation {
-    pub(crate) op_type: Operator,
-    pub(crate) sequence_id: usize,
 }
 
 pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
@@ -188,7 +175,6 @@ impl DataSmart {
             expand_state: RefCell::new(None),
             active_overrides: RefCell::new(None),
             inside_compute_overrides: RefCell::new(()),
-            statement_id: 0,
         }
     }
 
@@ -291,65 +277,28 @@ impl DataSmart {
         let base = stmt_node.lhs.var_base.clone();
         let lhs_cloned = stmt_node.lhs.clone();
 
-        let resolved_op = stmt_node.resolved_operator();
-        let stmt_idx = self.ds.add_node(GraphItem::StmtNode(stmt_node));
-
         // Lookup variable base (stem) and create if it doesn't exist
         let var_entry = self
             .vars
             .entry(base.to_string())
-            .or_insert_with(|| self.ds.add_node(GraphItem::new_variable(base)));
-
-        // // If not parsing, wipe away overrides
-        // if !parsing {
-        //     // TODO: not sure if it's this easy...
-        //     var_data.operations.clear();
-        // }
-
-        // if !parsing {
-        //     let existing_edges = self.ds.edges(*var_entry);
-        //     let mut s = vec![];
-        //
-        //     for edge in existing_edges {
-        //         s.push(edge.id());
-        //         // TODO delete node too
-        //     }
-        //     dbg!(&s);
-        //
-        //     for e in s {
-        //         self.ds.remove_edge(e);
-        //     }
-        // }
+            .or_insert_with(|| self.ds.add_node(Variable::new(base)));
 
         if normal_operator == NormalOperator::Assign {
-            let existing_edges = self.ds.edges(*var_entry);
-            let mut s = vec![];
-
-            for edge in existing_edges {
-                if edge.weight().op_type == Operator::Normal(NormalOperator::Assign) {
-                    let stmt = self.ds.node_weight(edge.target()).unwrap().statement();
-
-                    if lhs_cloned == stmt.lhs {
-                        s.push(edge.id());
-                    }
-                }
-                // TODO delete node too
-            }
-
-            for e in s {
-                self.ds.remove_edge(e);
-            }
+            self.ds
+                .node_weight_mut(*var_entry)
+                .unwrap()
+                .statements
+                .retain(|stmt| {
+                    stmt.resolved_operator() != Operator::Normal(NormalOperator::Assign)
+                        || lhs_cloned != stmt.lhs
+                });
         }
 
-        let _e = self.ds.add_edge(
-            *var_entry,
-            stmt_idx,
-            EdgeOperation {
-                op_type: resolved_op,
-                sequence_id: self.statement_id,
-            },
-        );
-        self.statement_id += 1;
+        self.ds
+            .node_weight_mut(*var_entry)
+            .unwrap()
+            .statements
+            .push(stmt_node);
 
         Some(*var_entry)
     }
@@ -459,38 +408,16 @@ impl DataSmart {
             return Ok(());
         };
 
-        let mut stmts = vec![];
-        let mut walker = self
-            .ds
-            .neighbors_directed(var_index, Direction::Outgoing)
-            .detach();
-
-        let _deleted_all_stmts = false;
-        while let Some(stmt_node_index) = walker.next_node(&self.ds) {
-            let stmt = self.ds.node_weight(stmt_node_index).unwrap().statement();
-
-            // As above, only consider normal assignments.
-            let Assignment { scope } = &stmt.lhs.kind else {
-                continue;
-            };
-
-            if scope.join(":") == parsed.override_string() {
-                stmts.push(stmt_node_index);
-                self.ds.remove_node(stmt_node_index);
-            }
-
-            // let var_node = self.ds.node_weight_mut(var_index).unwrap().variable_mut();
-            // var_node.operations.retain(|op| {
-            //     if stmts.contains(&op.idx) {
-            //         eprintln!("delete {:?}", op.idx);
-            //     }
-            //     !stmts.contains(&op.idx)
-            // });
-            //
-            // if var_node.operations.is_empty() {
-            //     deleted_all_stmts = true;
-            // }
-        }
+        self.ds
+            .node_weight_mut(var_index)
+            .unwrap()
+            .statements
+            .retain(|stmt| {
+                let Assignment { scope } = &stmt.lhs.kind else {
+                    return true;
+                };
+                scope.join(":") != parsed.override_string()
+            });
 
         Ok(())
     }
@@ -524,103 +451,51 @@ impl DataSmart {
             None => return Ok(()),
         };
 
-        // --- PHASE 1: Collect and Explicitly Isolate Edge IDs (Immutable Read) ---
-        let mut edges_to_move = Vec::new();
+        let old_statements =
+            std::mem::take(&mut self.ds.node_weight_mut(old_var_index).unwrap().statements);
+        let mut remaining_statements = Vec::with_capacity(old_statements.len());
+        let mut statements_to_move = Vec::new();
 
-        let mut walker = self
-            .ds
-            .neighbors_directed(old_var_index, Direction::Outgoing)
-            .detach();
-        while let Some((edge_idx, target_node_idx)) = walker.next(&self.ds) {
-            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx)
-                && let Some(new_lhs) = stmt.lhs.replace_assignment_prefix(&old_parsed, &new_parsed)
-            {
-                let op_metadata = *self.ds.edge_weight(edge_idx).unwrap();
-                edges_to_move.push((edge_idx, target_node_idx, op_metadata, new_lhs));
+        for mut stmt in old_statements {
+            if let Some(new_lhs) = stmt.lhs.replace_assignment_prefix(&old_parsed, &new_parsed) {
+                stmt.lhs = new_lhs;
+                statements_to_move.push(stmt);
+            } else {
+                remaining_statements.push(stmt);
             }
         }
 
-        if edges_to_move.is_empty() {
+        if statements_to_move.is_empty() {
+            self.ds.node_weight_mut(old_var_index).unwrap().statements = remaining_statements;
             return Ok(());
         }
 
-        edges_to_move.sort_by_key(|o| o.2.sequence_id);
+        let moving_a_base_assignment = statements_to_move
+            .iter()
+            .any(|stmt| matches!(&stmt.lhs.kind, Assignment { scope } if scope.is_empty()));
+        let old_is_empty = remaining_statements.is_empty();
+        self.ds.node_weight_mut(old_var_index).unwrap().statements = remaining_statements;
 
-        // --- PHASE 2: Ensure Target Root Exists ---
         let new_var_index = match self.vars.get(new_base) {
             Some(&idx) => idx,
             None => {
-                let new_node = self.ds.add_node(GraphItem::Variable(Variable {
-                    name: new_base.clone(),
-                    cached_value: RefCell::new(None),
-                    varflags: BTreeMap::new(),
-                }));
+                let new_node = self.ds.add_node(Variable::new(new_base.clone()));
                 self.vars.insert(new_base.clone(), new_node);
                 new_node
             }
         };
-
-        // --- PHASE 3: Apply the Precomputed Statement Rewrites ---
-        let moving_a_base_assignment = edges_to_move.iter().any(
-            |(_, _, _, new_lhs)| matches!(&new_lhs.kind, Assignment { scope } if scope.is_empty()),
-        );
-
-        for (_, stmt_idx, _, new_lhs) in &edges_to_move {
-            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight_mut(*stmt_idx) {
-                stmt.lhs = new_lhs.clone();
-            }
-        }
-
-        // --- PHASE 3.5: Handle BitBake setVar Clobbering ---
-        // If we are moving a pure base assignment into the destination variable node,
-        // BitBake semantics dictate that the previous destination base assignments are discarded.
+        let destination = self.ds.node_weight_mut(new_var_index).unwrap();
         if moving_a_base_assignment {
-            let mut dest_walker = self
-                .ds
-                .neighbors_directed(new_var_index, Direction::Outgoing)
-                .detach();
-
-            let mut dest_edges_to_remove = Vec::new();
-            while let Some((edge_idx, target_node_idx)) = dest_walker.next(&self.ds) {
-                if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(target_node_idx)
-                    && let Assignment { scope } = &stmt.lhs.kind
-                    && scope.is_empty()
-                {
-                    dest_edges_to_remove.push((edge_idx, target_node_idx));
-                }
-            }
-
-            for (edge_idx, stmt_idx) in dest_edges_to_remove {
-                self.ds.remove_edge(edge_idx);
-                self.ds.remove_node(stmt_idx);
-            }
+            destination
+                .statements
+                .retain(|stmt| !matches!(&stmt.lhs.kind, Assignment { scope } if scope.is_empty()));
         }
+        destination.statements.extend(statements_to_move);
 
-        // --- PHASE 4: Graph Topology Updates (With Edge Type Synchronization) ---
-        for (edge_idx, stmt_idx, mut op_metadata, _) in edges_to_move {
-            self.ds.remove_edge(edge_idx);
-
-            if let Some(GraphItem::StmtNode(stmt)) = self.ds.node_weight(stmt_idx) {
-                op_metadata.op_type = stmt.resolved_operator();
-            }
-
-            op_metadata.sequence_id = self.statement_id;
-            self.statement_id += 1;
-
-            self.ds.add_edge(new_var_index, stmt_idx, op_metadata);
-        }
-
-        // --- PHASE 5: Clean Up Residual Variable Nodes ---
-        let remaining_edges = self
-            .ds
-            .neighbors_directed(old_var_index, petgraph::Direction::Outgoing)
-            .count();
-        if remaining_edges == 0 {
+        if old_var_index != new_var_index && old_is_empty {
             self.vars.remove(old_base);
             self.ds.remove_node(old_var_index);
         }
-
-        self.del_var(old)?;
 
         Ok(())
     }
@@ -648,8 +523,8 @@ impl DataSmart {
         }
 
         // Sanity check: did we actually expand everything?
-        for stmt in self.ds.node_weights() {
-            if let GraphItem::StmtNode(stmt) = stmt {
+        for var in self.ds.node_weights() {
+            for stmt in &var.statements {
                 let o = stmt.lhs.override_string();
                 if !o.is_empty() {
                     assert!(!o.contains("${"));
@@ -735,30 +610,14 @@ impl DataSmart {
             true => override_state.clone(),
         };
 
-        let mut o: Vec<(usize, VariableOperation)> = vec![];
-        let mut operations: FifoHeap<VariableOperation> = FifoHeap::new();
-
-        for edge in self.ds.edges(*var_entry) {
-            o.push((
-                edge.weight().sequence_id,
-                VariableOperation {
-                    op_type: edge.weight().op_type,
-                    idx: edge.target(),
-                },
-            ))
-        }
-
-        o.sort_by_key(|e| e.0);
-
-        for op in o {
-            operations.push(op.1);
-        }
+        let variable = self.ds.node_weight(*var_entry).unwrap();
 
         // Calculate override scores for operations
-        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = operations
+        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = variable
+            .statements
             .iter()
-            .filter_map(|op| {
-                let statement = self.ds.node_weight(op.idx).unwrap().statement();
+            .enumerate()
+            .filter_map(|(stmt_index, statement)| {
                 if !var_suffix.is_empty() {
                     let stmt_scope = statement.lhs.kind.override_scope();
 
@@ -784,7 +643,7 @@ impl DataSmart {
                 // TODO: this re-checks is active basically.
                 let score = statement.lhs.kind.score(&override_selection_context)?;
                 let ret = ScoredOperation {
-                    stmt_index: op.idx,
+                    stmt_index,
                     score,
                     stmt: statement,
                 };
@@ -942,13 +801,10 @@ impl DataSmart {
             None => Cow::Owned(IndexSet::new()),
         };
 
-        for var in &self.vars {
-            // Iterate over statements
-            for edge in self.ds.edges(*var.1) {
-                let stmt_node = self.ds.node_weight(edge.target()).unwrap().statement();
-
-                let scope = stmt_node.lhs.override_scope().to_vec();
-                let mut parts = vec![var.0.clone()];
+        for (name, var_index) in &self.vars {
+            for stmt in &self.ds.node_weight(*var_index).unwrap().statements {
+                let scope = stmt.lhs.override_scope().to_vec();
+                let mut parts = vec![name.clone()];
                 parts.extend(scope);
                 ret.insert(parts.join(":"));
 

@@ -1,6 +1,4 @@
 use derive_more::From;
-use petgraph::graph::NodeIndex;
-use petgraph::stable_graph::DefaultIx;
 use std::cmp::Ordering;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
@@ -72,8 +70,7 @@ impl PartialOrd for Operator {
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub struct VariableOperation {
     pub(crate) op_type: Operator,
-    pub(crate) idx: NodeIndex<DefaultIx>,
-    // TODO: also store edge index maybe?
+    pub(crate) idx: usize,
 }
 
 impl Ord for VariableOperation {
