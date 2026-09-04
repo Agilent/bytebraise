@@ -10,22 +10,7 @@ mod wat;
 mod test {
     use crate::evaluate::eval;
     use crate::macros::get_var;
-    use crate::petgraph2::{DataSmart, score_override};
-    use indexmap::IndexSet;
-    use std::borrow::Cow;
-
-    fn score<S: AsRef<str>>(input: S) -> (Vec<usize>, usize, usize) {
-        let input = input.as_ref().replace(':', "");
-        let active_overrides: IndexSet<String> =
-            IndexSet::from(["a".into(), "b".into(), "c".into()]);
-
-        let candidate: Vec<String> = input.chars().map(String::from).collect();
-        let ret = score_override(&Cow::Borrowed(&active_overrides), &candidate).unwrap();
-
-        eprintln!("{input} => {ret:?}");
-
-        ret
-    }
+    use crate::petgraph2::DataSmart;
 
     #[test]
     fn doc_examples() {
@@ -352,12 +337,6 @@ OVERRIDES = "a:b:c"
             "#,
         );
 
-        score("");
-        score("a");
-        score("b");
-        score("b:a");
-        score("a:b");
-
         assert_eq!(get_var!(&d, "TEST"), Some("5".into()));
     }
 
@@ -504,13 +483,6 @@ OVERRIDES = "a:b:c"
             "#,
         );
 
-        score("ab");
-        score("ba");
-        score("aba");
-        score("bab");
-        score("aabb");
-        score("abab");
-        score("baba");
         assert_eq!(get_var!(&d, "TEST"), Some("4".into()));
     }
 

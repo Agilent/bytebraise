@@ -25,13 +25,12 @@ Major todos:
 use crate::errors::{DataSmartError, DataSmartResult};
 use crate::keys_iter::KeysIter;
 use crate::macros::{get_var, set_var_ex};
-use crate::nodes::{ScoredOperation, Variable};
+use crate::nodes::{OperationScope, ResolvedOperation, Variable};
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
 use crate::variable_parser::{parse_statement, parse_variable};
 use anyhow::bail;
 use bytebraise_util::fifo_heap::FifoHeap;
-use bytebraise_util::retain_with_index::RetainWithIndex;
 use bytebraise_util::split::{replace_all, split_filter_empty, split_keep};
 use fxhash::FxHashMap;
 use indexmap::{IndexMap, IndexSet};
@@ -82,8 +81,6 @@ pub struct DataSmart {
     inside_compute_overrides: RefCell<()>,
 }
 
-pub(crate) type OverrideScore = (Vec<usize>, usize, usize);
-
 // BitBake reduces all active override variants together. Distinct scopes can collapse to the same
 // key, so insertion order and replacement behavior are part of selection semantics.
 fn select_override_scope(variable: &Variable, active_overrides: &IndexSet<String>) -> Vec<String> {
@@ -133,75 +130,6 @@ fn select_override_scope(variable: &Variable, active_overrides: &IndexSet<String
     }
 
     selected
-}
-
-// For OVERRIDES = "a:b:c",
-//
-// ab => ([0, 1, 1], 2, 1)
-// ba => ([0, 1, 1], 1, 2)
-// aba => ([0, 1, 2], 2, 1)
-// bab => ([0, 2, 1], 2, 2)
-// aabb => ([0, 2, 2], 3, 1)
-// abab => ([0, 2, 2], 3, 1)
-// baba => ([0, 2, 2], 2, 2)
-//#[tracing::instrument(ret)]
-pub(crate) fn score_override(
-    active_overrides: &Cow<IndexSet<String>>,
-    candidate_overrides: &Vec<String>,
-) -> Option<OverrideScore> {
-    let c: IndexSet<String> = candidate_overrides.iter().cloned().collect();
-    if !c.is_subset(active_overrides) {
-        return None;
-    }
-
-    let mut ret = (vec![], 0, 0);
-    if candidate_overrides.is_empty() {
-        return Some(ret);
-    }
-
-    let counts = candidate_overrides.iter().counts();
-    // Overrides (in `active_overrides`) are listed in priority order, from lowest to highest.
-    // Count the # of times each override appears in the given list, then reverse the list so that
-    // higher-priority counts come first.
-    ret.0 = active_overrides
-        .iter()
-        .map(|o| counts.get(o).copied().unwrap_or_default())
-        .rev()
-        .collect();
-
-    let mut candidate = candidate_overrides.clone();
-
-    let mut keep_going = true;
-    'outer: while keep_going {
-        keep_going = false;
-
-        // Keep track of the # of times it takes to go through the loop. This is the first
-        // tiebreaker for ordering.
-        ret.1 += 1;
-
-        for (override_index, active_override) in active_overrides.iter().enumerate() {
-            // eprintln!(
-            //     "\tconsider override {active_override}, left: {}",
-            //     candidate.join("")
-            // );
-
-            // Has to be len() > 1 because we are emulating checking for :<override>.
-            if candidate.len() > 1 && candidate.ends_with(std::slice::from_ref(active_override)) {
-                // This emulates:  active[a.replace(":" + o, "")] = t
-                // Note the original BitBake code unintentionally(?) removes all existences of the
-                // override, not just the one in tail position.
-                candidate.retain_with_index(|c, i| i == 0 || c != active_override);
-                keep_going = true;
-            } else if candidate.len() == 1 && &candidate[0] == active_override {
-                assert_eq!(ret.2, 0);
-                // Final (least-significant) tiebreaker is index of the override on which we stopped
-                ret.2 = override_index + 1;
-                break 'outer;
-            }
-        }
-    }
-
-    Some(ret)
 }
 
 fn split_overrides<S: AsRef<str>>(input: S) -> Vec<String> {
@@ -670,7 +598,7 @@ impl DataSmart {
 
         // The winning scope is selected globally above. Scores only order the operations that
         // belong to that scope and the unqualified deferred operations that also apply to it.
-        let mut resolved_variable_operations: FifoHeap<ScoredOperation> = variable
+        let mut resolved_variable_operations: FifoHeap<ResolvedOperation> = variable
             .statements
             .iter()
             .enumerate()
@@ -697,11 +625,14 @@ impl DataSmart {
                     return None;
                 }
 
-                // TODO: this re-checks is active basically.
-                let score = statement.lhs.kind.score(&override_selection_context)?;
-                let ret = ScoredOperation {
+                let scope = if stmt_scope == selected_scope.as_slice() {
+                    OperationScope::Selected
+                } else {
+                    OperationScope::Unqualified
+                };
+                let ret = ResolvedOperation {
                     stmt_index,
-                    score,
+                    scope,
                     stmt: statement,
                 };
 
@@ -769,12 +700,6 @@ impl DataSmart {
         resolved_variable_operations.retain(|op| {
             // Remove the variable operation that we used for the start value, so we don't double apply
             op.stmt_index != resolved_start_value.stmt_index
-                // Handle override scoring + LHS
-                // TODO: clarify
-                && (op.score >= resolved_start_value.score
-                    || (op.stmt.is_override_operation()
-                        && (op.stmt.lhs.kind.override_scope() == resolved_start_value.stmt.lhs.kind.override_scope()
-                            || op.stmt.lhs.kind.override_scope().is_empty())))
         });
 
         eprintln!("start value for get {:?} = {:?} ", parsed, ret,);

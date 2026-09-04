@@ -1,4 +1,3 @@
-use crate::petgraph2::OverrideScore;
 use crate::variable_operation::VariableOperation;
 use crate::variable_parser::StatementNode2;
 use bytebraise_util::fifo_heap::FifoHeap;
@@ -47,16 +46,22 @@ impl Variable {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum OperationScope {
+    Selected,
+    Unqualified,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ScoredOperation<'a> {
-    pub(crate) score: OverrideScore,
+pub struct ResolvedOperation<'a> {
+    pub(crate) scope: OperationScope,
     pub(crate) stmt: &'a StatementNode2,
     pub(crate) stmt_index: usize,
 }
 
-impl<'a> Ord for ScoredOperation<'a> {
+impl<'a> Ord for ResolvedOperation<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.score.cmp(&other.score).reverse().then(
+        self.scope.cmp(&other.scope).then(
             self.stmt
                 .resolved_operator()
                 .cmp(&other.stmt.resolved_operator()),
@@ -64,7 +69,7 @@ impl<'a> Ord for ScoredOperation<'a> {
     }
 }
 
-impl<'a> PartialOrd for ScoredOperation<'a> {
+impl<'a> PartialOrd for ResolvedOperation<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }

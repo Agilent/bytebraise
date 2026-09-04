@@ -1,5 +1,3 @@
-use crate::petgraph2;
-use crate::petgraph2::OverrideScore;
 use crate::variable_operation::{NormalOperator, Operator, OverrideOperator};
 use crate::variable_parser::VariableExpressionKind::{Assignment, OverrideOperation};
 use indexmap::IndexSet;
@@ -158,15 +156,6 @@ impl VariableExpressionKind {
                 let scope_set: IndexSet<String> = scope.iter().cloned().collect();
                 scope_set.is_subset(override_selection_context)
             }
-        }
-    }
-
-    pub(crate) fn score(&self, active_overrides: &Cow<IndexSet<String>>) -> Option<OverrideScore> {
-        // The score is derived from the scope alone
-        // TODO: reimplement in terms of `override_scope`?
-        match self {
-            OverrideOperation { scope, .. } => petgraph2::score_override(active_overrides, scope),
-            Assignment { scope } => petgraph2::score_override(active_overrides, scope),
         }
     }
 
