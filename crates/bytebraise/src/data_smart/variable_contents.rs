@@ -162,7 +162,7 @@ where
     default fn from(value: HashMap<String, T>) -> Self {
         value
             .into_iter()
-            .map(|(k, v)| (k, v.into()))
+            .map(|(k, v)| (k, <T as Into<T>>::into(v)))
             .collect::<BTreeMap<String, _>>()
             .into()
     }
@@ -175,7 +175,7 @@ where
     default fn from(value: BTreeMap<String, T>) -> Self {
         value
             .into_iter()
-            .map(|(k, v)| (k, v.into()))
+            .map(|(k, v)| (k, <T as Into<T>>::into(v)))
             .collect::<BTreeMap<String, _>>()
             .into()
     }
@@ -184,13 +184,16 @@ where
 impl<T> From<BTreeSet<T>> for VariableContents
 where
     VariableContents: From<T>,
+    T: std::cmp::Ord,
 {
     default fn from(value: BTreeSet<T>) -> Self {
-        value
-            .into_iter()
-            .map(|v| v.into())
-            .collect::<BTreeSet<_>>()
-            .into()
+        <BTreeSet<T> as Into<VariableContents>>::into(
+            value
+                .into_iter()
+                .map(|v| v.into())
+                .collect::<BTreeSet<_>>()
+                .into(),
+        )
     }
 }
 
