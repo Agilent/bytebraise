@@ -10,7 +10,7 @@ Implemented:
 
 Major todos:
     - Caching
-    - Parsing mode
+    - Runtime setVar semantics when parsing=false
     - Non-string data - this should print 3:
         python() {
             d.setVar("TEST2", 1)
@@ -19,7 +19,6 @@ Major todos:
         }
     - Varflags
     - Variable history
-    - append/prepend/remove combined with +=, .=, etc.
 */
 
 use crate::errors::{DataSmartError, DataSmartResult};

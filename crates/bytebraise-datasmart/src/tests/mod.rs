@@ -47,6 +47,23 @@ TEST:append = "3"
     }
 
     #[test]
+    fn parsing_mode_excludes_deferred_operations() {
+        let d = eval(
+            r#"
+TEST = "one two"
+TEST:append = " three"
+TEST:prepend = "zero "
+TEST:remove = "two"
+        "#,
+        );
+
+        // This covers parsing-mode reads. The remaining goal is to honor parsing mode in set_var
+        // so runtime assignments can clobber deferred operations like BitBake does.
+        assert_eq!(get_var!(&d, "TEST", parsing = true), Some("one two".into()));
+        assert_eq!(get_var!(&d, "TEST"), Some("zero one  three".into()));
+    }
+
+    #[test]
     fn override_score() {
         let d = eval(
             r#"
