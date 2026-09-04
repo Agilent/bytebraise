@@ -511,6 +511,11 @@ impl DataSmart {
         let old_parsed = parse_variable(old);
         let new_parsed = parse_variable(new);
 
+        // Override operations belong to their base variable; they are not standalone keys.
+        if matches!(old_parsed.kind, OverrideOperation { .. }) {
+            return Ok(());
+        }
+
         let old_base = &old_parsed.var_base;
         let new_base = &new_parsed.var_base;
 

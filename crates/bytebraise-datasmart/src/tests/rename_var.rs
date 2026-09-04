@@ -16,6 +16,74 @@ TEST = "A"
     assert_eq!(get_var!(&d, "NEW").unwrap(), "A");
 }
 
+#[test]
+fn operator_sources_are_not_renamed() {
+    for old in [
+        "TEST:append",
+        "TEST:prepend",
+        "TEST:remove",
+        "TEST:a:append:b",
+        "TEST:a:prepend:b",
+        "TEST:a:remove:b",
+    ] {
+        let mut d = eval(
+            r#"
+TEST = "one two"
+TEST:append = " three"
+TEST:prepend = "zero "
+TEST:remove = "two"
+TEST:a = "scoped"
+TEST:a:append:b = " appended"
+TEST:a:prepend:b = "prepended "
+TEST:a:remove:b = "scoped"
+    "#,
+        );
+
+        let value = get_var!(&d, "TEST");
+        let keys = d.get_all_keys();
+
+        d.rename_var(old, "NEW").unwrap();
+
+        assert_eq!(get_var!(&d, "TEST"), value);
+        assert_eq!(get_var!(&d, "NEW"), None);
+        assert_eq!(d.get_all_keys(), keys);
+    }
+}
+
+#[test]
+fn rename_preserves_matching_text_in_scope() {
+    let mut d = eval(
+        r#"
+foo:foo = "value"
+    "#,
+    );
+
+    d.rename_var("foo", "bar").unwrap();
+
+    // BitBake's global str.replace produces bar:bar. Bytebraise only renames the
+    // parsed variable base, leaving the semantically separate override scope intact.
+    assert_eq!(d.get_all_keys(), vec!["bar:foo"]);
+    assert_eq!(get_var!(&d, "bar:foo").unwrap(), "value");
+}
+
+#[test]
+fn rename_preserves_matching_text_in_operation_scope_and_filter() {
+    let mut d = eval(
+        r#"
+foo = "base"
+foo:foo:append:foo = " appended"
+OVERRIDES = "foo"
+    "#,
+    );
+
+    d.rename_var("foo", "bar").unwrap();
+
+    // Unlike BitBake's textual rename, keep the operation's parsed scope and filter;
+    // they describe when the operation applies and are not part of the variable name.
+    assert_eq!(get_var!(&d, "bar").unwrap(), " appended");
+    assert_eq!(d.get_all_keys(), vec!["OVERRIDES", "bar", "bar:foo"]);
+}
+
 #[test_log::test]
 fn basic_2() {
     let mut d = eval(
